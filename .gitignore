@@ -1,0 +1,30 @@
+# Environment files with secrets
+.env
+.env.local
+.env.production
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+mysql-data/
+redis-data/
+
+# SSL certs
+nginx/ssl/*.pem
+nginx/ssl/*.key
+
+/frontend/node_modules
+/frontend/.next
+/backend/vendor
+/backend/.env
+/frontend/.env.local
+.env
+*.zip
