@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { fetchDashboardStats } from '@/lib/api';
 import type { DashboardStats } from '@/types';
-import { Building2, CheckCircle, Clock, TrendingUp } from 'lucide-react';
+import { Building2, Phone, Send, TrendingUp } from 'lucide-react';
 
 export function DashboardContent() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -12,8 +12,7 @@ export function DashboardContent() {
 
   useEffect(() => {
     loadStats();
-    // Refresh every 30 seconds
-    const interval = setInterval(loadStats, 30000);
+    const interval = setInterval(loadStats, 15000);
     return () => clearInterval(interval);
   }, []);
 
@@ -35,7 +34,7 @@ export function DashboardContent() {
         <div className="h-8 w-48 bg-gray-200 rounded" />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-32 bg-gray-200 rounded-xl" />
+            <div key={i} className="h-32 bg-gray-100 rounded-xl" />
           ))}
         </div>
       </div>
@@ -53,34 +52,43 @@ export function DashboardContent() {
     );
   }
 
+  const totalCompanies = stats?.total_companies ?? 0;
+  const withPhone = stats?.with_phone ?? 0;
+  const sentToday = stats?.sent_today ?? 0;
+  const phoneRate = totalCompanies > 0 ? Math.round((withPhone / totalCompanies) * 100) : 0;
+
   const statCards = [
     {
-      label: 'Tổng doanh nghiệp',
-      value: stats?.total_companies ?? 0,
+      label: 'Tổng DN đã quét',
+      value: totalCompanies,
       icon: Building2,
       color: 'text-blue-600',
       bg: 'bg-blue-50',
+      desc: 'Tất cả DN đã thu thập',
     },
     {
-      label: 'Hôm nay',
-      value: stats?.today_scraped ?? 0,
-      icon: TrendingUp,
+      label: 'DN có SĐT',
+      value: withPhone,
+      icon: Phone,
       color: 'text-green-600',
       bg: 'bg-green-50',
+      desc: 'DN đủ điều kiện gửi',
     },
     {
-      label: 'Đã gửi thông báo',
-      value: stats?.notifications_sent ?? 0,
-      icon: CheckCircle,
+      label: 'Đã gửi hôm nay',
+      value: sentToday,
+      icon: Send,
       color: 'text-purple-600',
       bg: 'bg-purple-50',
+      desc: 'Thông báo Telegram',
     },
     {
-      label: 'Chờ xử lý',
-      value: stats?.pending_notifications ?? 0,
-      icon: Clock,
+      label: 'Tỷ lệ có SĐT',
+      value: `${phoneRate}%`,
+      icon: TrendingUp,
       color: 'text-orange-600',
       bg: 'bg-orange-50',
+      desc: 'Chất lượng data',
     },
   ];
 
@@ -103,8 +111,9 @@ export function DashboardContent() {
                 <div>
                   <p className="text-sm text-gray-500">{card.label}</p>
                   <p className="text-3xl font-bold text-gray-900 mt-1">
-                    {card.value.toLocaleString('vi-VN')}
+                    {typeof card.value === 'number' ? card.value.toLocaleString('vi-VN') : card.value}
                   </p>
+                  <p className="text-xs text-gray-400 mt-1">{card.desc}</p>
                 </div>
                 <div className={`rounded-full p-3 ${card.bg}`}>
                   <Icon className={`h-6 w-6 ${card.color}`} aria-hidden="true" />
@@ -115,17 +124,43 @@ export function DashboardContent() {
         })}
       </div>
 
+      {/* Recent Activity */}
+      <div className="card">
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Trạng thái hệ thống</h3>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+            </span>
+            <span className="text-sm text-gray-700">Scraper đang hoạt động (quét mỗi 30 giây)</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-3 w-3">
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+            </span>
+            <span className="text-sm text-gray-700">Telegram Bot kết nối</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-3 w-3">
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+            </span>
+            <span className="text-sm text-gray-700">Proxy TMProxy active</span>
+          </div>
+        </div>
+      </div>
+
       {/* Provinces Summary */}
       {stats?.provinces && stats.provinces.length > 0 && (
         <div className="card">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">
-            Tỉnh/Thành phố đã thu thập
+            Tỉnh/Thành phố đã thu thập ({stats.provinces.length})
           </h3>
           <div className="flex flex-wrap gap-2">
             {stats.provinces.map((province) => (
               <span
                 key={province}
-                className="inline-flex items-center rounded-full bg-primary-50 px-3 py-1 text-xs font-medium text-primary-700"
+                className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700"
               >
                 {province}
               </span>

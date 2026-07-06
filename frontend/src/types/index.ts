@@ -78,9 +78,9 @@ export interface TelegramConfigFormData {
 
 export interface DashboardStats {
   total_companies: number;
-  today_scraped: number;
+  with_phone: number;
+  sent_today: number;
   notifications_sent: number;
-  pending_notifications: number;
   provinces: string[];
 }
 
