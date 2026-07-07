@@ -2,19 +2,16 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\ProcessCompanyNotification;
 use App\Models\TelegramConfig;
+use App\Services\PdfService;
 use App\Services\ScraperService;
+use App\Services\TelegramService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Artisan command - cron entry point chạy mỗi 1-2 phút.
- *
- * Flow:
- * 1. Scrape DN mới từ masothue.com
- * 2. Mọi DN mới đều gửi thông báo Telegram ngay lập tức (< 4 phút)
- * 3. PDF + Telegram xử lý qua Queue (async, không block scraper)
+ * Scrape DN mới + gửi Telegram trực tiếp (không qua queue).
+ * Chạy mỗi 10 giây. Tất cả DN mới có SĐT được gửi ngay lập tức.
  */
 class ScrapeCompanies extends Command
 {
@@ -30,13 +27,12 @@ class ScrapeCompanies extends Command
         parent::__construct();
     }
 
-    public function handle(): int
+    public function handle(PdfService $pdfService, TelegramService $telegramService): int
     {
         $startTime = microtime(true);
         $isDryRun = $this->option('dry-run');
 
         $this->info('Bắt đầu scrape...');
-        Log::info('ScrapeCompanies: Starting', ['dry_run' => $isDryRun]);
 
         // Step 1: Scrape DN mới
         $newCompanies = $this->scraperService->scrapeLatest();
@@ -49,41 +45,46 @@ class ScrapeCompanies extends Command
             return self::SUCCESS;
         }
 
-        // Step 2: Gửi thông báo cho TẤT CẢ DN mới (không filter)
+        // Step 2: Gửi Telegram TRỰC TIẾP (không qua queue)
         $telegramConfig = TelegramConfig::where('is_active', true)->first();
 
         if (!$telegramConfig) {
-            $this->warn('Chưa có cấu hình Telegram active. DN đã lưu DB nhưng không gửi thông báo.');
+            $this->warn('Chưa có cấu hình Telegram active.');
             return self::SUCCESS;
         }
 
-        $dispatchCount = 0;
+        $sentCount = 0;
 
         foreach ($newCompanies as $company) {
-            // Điều kiện tiên quyết: chỉ gửi thông báo DN có số điện thoại
+            // Chỉ gửi DN có SĐT
             if (empty($company->phone)) {
                 continue;
             }
 
             if ($isDryRun) {
-                $this->line("  [DRY-RUN] Sẽ gửi: {$company->mst} - {$company->name}");
+                $this->line("  [DRY-RUN] {$company->mst} - {$company->name}");
                 continue;
             }
 
-            // Dispatch async job: tạo PDF + gửi Telegram
-            ProcessCompanyNotification::dispatchNewCompany($company, $telegramConfig);
-            $dispatchCount++;
+            try {
+                // Tạo PDF + gửi Telegram ngay
+                $pdfPath = $pdfService->generateCompanyPdf($company);
+                $sent = $telegramService->sendDocument($pdfPath, $telegramConfig, $company);
+                $pdfService->cleanup($pdfPath);
+
+                if ($sent) {
+                    $company->update(['notification_sent' => true]);
+                    $sentCount++;
+                }
+            } catch (\Throwable $e) {
+                Log::error("ScrapeCompanies: Failed to send {$company->mst}", [
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         $elapsed = round(microtime(true) - $startTime, 2);
-
-        $this->info("Hoàn tất trong {$elapsed}s. Scraped: {$companiesCount}, Jobs dispatched: {$dispatchCount}");
-
-        Log::info('ScrapeCompanies: Done', [
-            'elapsed_seconds' => $elapsed,
-            'scraped' => $companiesCount,
-            'dispatched' => $dispatchCount,
-        ]);
+        $this->info("Hoàn tất trong {$elapsed}s. Scraped: {$companiesCount}, Sent: {$sentCount}");
 
         return self::SUCCESS;
     }
