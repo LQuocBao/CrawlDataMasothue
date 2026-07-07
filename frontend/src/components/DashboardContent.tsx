@@ -55,7 +55,7 @@ export function DashboardContent() {
   const totalCompanies = stats?.total_companies ?? 0;
   const withPhone = stats?.with_phone ?? 0;
   const sentToday = stats?.sent_today ?? 0;
-  const phoneRate = totalCompanies > 0 ? Math.round((withPhone / totalCompanies) * 100) : 0;
+  const skipped = totalCompanies - withPhone;
 
   const statCards = [
     {
@@ -83,12 +83,12 @@ export function DashboardContent() {
       desc: 'Thông báo Telegram',
     },
     {
-      label: 'Tỷ lệ có SĐT',
-      value: `${phoneRate}%`,
+      label: 'DN bị loại',
+      value: skipped,
       icon: TrendingUp,
-      color: 'text-orange-600',
-      bg: 'bg-orange-50',
-      desc: 'Chất lượng data',
+      color: 'text-red-500',
+      bg: 'bg-red-50',
+      desc: 'Không có SĐT',
     },
   ];
 
