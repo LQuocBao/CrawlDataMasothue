@@ -82,12 +82,6 @@ class ScraperService
                         $processed++;
                     }
                 }
-
-                // Delay giữa các request: không proxy → 1-2 giây, có proxy → 300-800ms
-                $hasProxy = !empty($this->proxies);
-                $delayMin = $hasProxy ? 300000 : 1000000;   // 0.3s vs 1s
-                $delayMax = $hasProxy ? 800000 : 2000000;   // 0.8s vs 2s
-                usleep(random_int($delayMin, $delayMax));
             }
         } catch (\Throwable $e) {
             Log::error('ScraperService: Scraping failed', [
