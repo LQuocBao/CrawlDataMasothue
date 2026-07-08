@@ -26,4 +26,6 @@ Route::prefix('v1')->group(function () {
     // Telegram configuration
     Route::apiResource('telegram-configs', TelegramConfigController::class);
     Route::post('telegram-configs/{telegramConfig}/test', [TelegramConfigController::class, 'test']);
+    // Google Sheets (danh sách theo ngày)
+    Route::get('sheets', [\App\Http\Controllers\Api\GoogleSheetController::class, 'index']);
 });

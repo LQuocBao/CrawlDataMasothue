@@ -3,12 +3,13 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, Filter, Send, Database } from 'lucide-react';
+import { LayoutDashboard, Filter, Send, Database, FileSpreadsheet } from 'lucide-react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/filters', label: 'Bộ lọc', icon: Filter },
   { href: '/telegram', label: 'Telegram', icon: Send },
+  { href: '/sheets', label: 'Google Sheets', icon: FileSpreadsheet },
 ];
 
 export function Sidebar() {

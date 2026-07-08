@@ -27,6 +27,10 @@ return [
     // TMProxy API Key (if using tmproxy.com)
     'tmproxy_key' => env('SCRAPER_TMPROXY_KEY'),
 
+    // Google Sheets integration
+    'google_credentials_path' => env('GOOGLE_CREDENTIALS_PATH', base_path('google-credentials.json')),
+    'google_drive_folder_id' => env('GOOGLE_DRIVE_FOLDER_ID', '10O6NWxq6s92Kb63YpqMb6x04gmAwW6y9'),
+
     // Whether to verify SSL certificates through proxy
     'verify_ssl' => env('SCRAPER_VERIFY_SSL', true),
 

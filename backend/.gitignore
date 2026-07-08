@@ -1,0 +1,6 @@
+vendor/
+node_modules/
+.env
+google-credentials.json
+storage/app/pdfs/*
+!storage/app/pdfs/.gitkeep

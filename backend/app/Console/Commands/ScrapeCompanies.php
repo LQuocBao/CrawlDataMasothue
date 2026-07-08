@@ -45,7 +45,7 @@ class ScrapeCompanies extends Command
             return self::SUCCESS;
         }
 
-        // Step 2: Gửi Telegram TRỰC TIẾP (không qua queue)
+        // Step 2: Gửi Telegram TRỰC TIẾP + Ghi Google Sheet
         $telegramConfig = TelegramConfig::where('is_active', true)->first();
 
         if (!$telegramConfig) {
@@ -53,6 +53,7 @@ class ScrapeCompanies extends Command
             return self::SUCCESS;
         }
 
+        $googleSheet = app(\App\Services\GoogleSheetService::class);
         $sentCount = 0;
 
         foreach ($newCompanies as $company) {
@@ -75,6 +76,9 @@ class ScrapeCompanies extends Command
                 if ($sent) {
                     $company->update(['notification_sent' => true]);
                     $sentCount++;
+
+                    // Ghi vào Google Sheet
+                    $googleSheet->appendCompany($company);
                 }
             } catch (\Throwable $e) {
                 Log::error("ScrapeCompanies: Failed to send {$company->mst}", [
