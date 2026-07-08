@@ -86,7 +86,8 @@ class TelegramService
     {
         $caption = "{$company->name}\n";
         $caption .= "MST: {$company->mst}\n";
-        $caption .= "SĐT: {$company->phone}";
+        $caption .= "SĐT: {$company->phone}\n";
+        $caption .= "Ngày TL: " . ($company->operation_date ? $company->operation_date->format('d/m/Y') : ($company->registration_date ? $company->registration_date->format('d/m/Y') : 'N/A'));
 
         return $caption;
     }
