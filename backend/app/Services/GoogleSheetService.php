@@ -25,7 +25,9 @@ class GoogleSheetService
             $primary = collect($industries)->firstWhere('is_primary', true);
             $primaryIndustry = $primary['description'] ?? ($industries[0]['description'] ?? '');
 
-            $response = Http::timeout(10)->post(self::WEBHOOK_URL, [
+            $response = Http::timeout(10)
+                ->withOptions(['allow_redirects' => true])
+                ->post(self::WEBHOOK_URL, [
                 'mst' => $company->mst,
                 'name' => $company->name,
                 'phone' => $company->phone ?? '',
