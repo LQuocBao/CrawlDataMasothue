@@ -10,8 +10,9 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Scrape DN mới + gửi Telegram trực tiếp (không qua queue).
- * Chạy mỗi 10 giây. Tất cả DN mới có SĐT được gửi ngay lập tức.
+ * Scrape DN mới + gửi Telegram + ghi Google Sheet.
+ * - TẤT CẢ DN mới đều ghi vào Google Sheet
+ * - Chỉ DN có SĐT mới gửi Telegram
  */
 class ScrapeCompanies extends Command
 {
@@ -45,30 +46,25 @@ class ScrapeCompanies extends Command
             return self::SUCCESS;
         }
 
-        // Step 2: Gửi Telegram TRỰC TIẾP + Ghi Google Sheet
         $telegramConfig = TelegramConfig::where('is_active', true)->first();
-
-        if (!$telegramConfig) {
-            $this->warn('Chưa có cấu hình Telegram active.');
-            return self::SUCCESS;
-        }
-
         $googleSheet = app(\App\Services\GoogleSheetService::class);
         $sentCount = 0;
 
         foreach ($newCompanies as $company) {
-            // Chỉ gửi DN có SĐT
-            if (empty($company->phone)) {
-                continue;
-            }
-
             if ($isDryRun) {
                 $this->line("  [DRY-RUN] {$company->mst} - {$company->name}");
                 continue;
             }
 
+            // Ghi TẤT CẢ DN vào Google Sheet (có SĐT hay không đều ghi)
+            $googleSheet->appendCompany($company);
+
+            // Chỉ gửi Telegram cho DN có SĐT
+            if (empty($company->phone) || !$telegramConfig) {
+                continue;
+            }
+
             try {
-                // Tạo PDF + gửi Telegram ngay
                 $pdfPath = $pdfService->generateCompanyPdf($company);
                 $sent = $telegramService->sendDocument($pdfPath, $telegramConfig, $company);
                 $pdfService->cleanup($pdfPath);
@@ -76,9 +72,6 @@ class ScrapeCompanies extends Command
                 if ($sent) {
                     $company->update(['notification_sent' => true]);
                     $sentCount++;
-
-                    // Ghi vào Google Sheet
-                    $googleSheet->appendCompany($company);
                 }
             } catch (\Throwable $e) {
                 Log::error("ScrapeCompanies: Failed to send {$company->mst}", [
