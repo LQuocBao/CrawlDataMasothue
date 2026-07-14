@@ -4,18 +4,19 @@ use Illuminate\Support\Facades\Schedule;
 
 /*
 |--------------------------------------------------------------------------
-| Console Routes (Task Scheduling)
+| Task Scheduling
 |--------------------------------------------------------------------------
 |
-| The scraper runs on a tight schedule (every 1-2 minutes) to meet
-| the < 4 minute latency requirement from data appearance to delivery.
+| Scraper chain chạy mỗi phút. Bus::chain đảm bảo:
+| 1. Proxy rotate → 2. Cào masothue → 3. Cào tramasothue
+| Tất cả nối đuôi nhau trên cùng 1 IP proxy.
+|
+| Notification (PDF + Telegram) chạy song song trên queue "notifications".
 |
 */
 
-$interval = (int) config('scraper.schedule_interval', 1);
-
-Schedule::command('scrape:companies')
+Schedule::command('scraper:run')
     ->everyMinute()
-    ->withoutOverlapping(3) // Prevent overlap, lock for 3 minutes
+    ->withoutOverlapping(5)
     ->runInBackground()
     ->appendOutputTo(storage_path('logs/scraper.log'));

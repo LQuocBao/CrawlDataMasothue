@@ -1,10 +1,9 @@
 #=============================================================================
-# DEVELOPMENT Docker Compose
-# Start with: docker compose up -d
+# LOCAL DEV - Kiến trúc Bus::chain + Queue Workers
 #=============================================================================
 
 services:
-  # ─── Laravel Backend ─────────────────────────────────────────────────────
+  # ─── Laravel API ─────────────────────────────────────────────────────────
   app:
     build:
       context: ./backend
@@ -15,7 +14,6 @@ services:
     working_dir: /var/www
     volumes:
       - ./backend:/var/www
-      - ./backend/storage/app/pdfs:/var/www/storage/app/pdfs
     ports:
       - "8000:8000"
     environment:
@@ -23,7 +21,8 @@ services:
       - APP_DEBUG=true
       - DB_HOST=mysql
       - REDIS_HOST=redis
-      - QUEUE_CONNECTION=database
+      - QUEUE_CONNECTION=redis
+      - CACHE_DRIVER=redis
     depends_on:
       mysql:
         condition: service_healthy
@@ -33,13 +32,13 @@ services:
       - mst-network
     command: php artisan serve --host=0.0.0.0 --port=8000
 
-  # ─── Queue Worker (dev uses database driver) ─────────────────────────────
-  worker:
+  # ─── Worker: Scraping Queue (chain tuần tự) ──────────────────────────────
+  worker-scraping:
     build:
       context: ./backend
       dockerfile: Dockerfile
       target: development
-    container_name: mst-worker
+    container_name: mst-worker-scraping
     restart: unless-stopped
     working_dir: /var/www
     volumes:
@@ -48,14 +47,38 @@ services:
       - APP_ENV=local
       - DB_HOST=mysql
       - REDIS_HOST=redis
-      - QUEUE_CONNECTION=database
+      - QUEUE_CONNECTION=redis
+      - CACHE_DRIVER=redis
     depends_on:
       - app
     networks:
       - mst-network
-    command: php artisan queue:work database --queue=notifications,default --sleep=3 --tries=3 --max-time=3600
+    command: php artisan queue:work redis --queue=scraping --sleep=2 --tries=2 --max-time=3600 --memory=256
 
-  # ─── Scheduler (triggers scrape every 1-2 min) ──────────────────────────
+  # ─── Worker: Notifications Queue (PDF + Telegram, song song) ─────────────
+  worker-notifications:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: mst-worker-notifications
+    restart: unless-stopped
+    working_dir: /var/www
+    volumes:
+      - ./backend:/var/www
+    environment:
+      - APP_ENV=local
+      - DB_HOST=mysql
+      - REDIS_HOST=redis
+      - QUEUE_CONNECTION=redis
+      - CACHE_DRIVER=redis
+    depends_on:
+      - app
+    networks:
+      - mst-network
+    command: php artisan queue:work redis --queue=notifications --sleep=1 --tries=3 --max-time=3600 --memory=256
+
+  # ─── Scheduler (Laravel Task Scheduling) ─────────────────────────────────
   scheduler:
     build:
       context: ./backend
@@ -70,13 +93,13 @@ services:
       - APP_ENV=local
       - DB_HOST=mysql
       - REDIS_HOST=redis
-      - QUEUE_CONNECTION=database
+      - QUEUE_CONNECTION=redis
+      - CACHE_DRIVER=redis
     depends_on:
       - app
     networks:
       - mst-network
-    command: >
-      sh -c "while true; do php artisan schedule:run --verbose --no-interaction; sleep 60; done"
+    command: sh -c "while true; do php artisan schedule:run --no-interaction; sleep 60; done"
 
   # ─── Next.js Frontend ────────────────────────────────────────────────────
   frontend:

@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Models\Company;
-use App\Models\Filter;
 use App\Models\TelegramConfig;
 use App\Services\PdfService;
 use App\Services\TelegramService;
@@ -15,8 +14,10 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Job xử lý: tạo PDF + gửi Telegram cho 1 DN.
- * Chạy async trên queue, không block scraper.
+ * Job xử lý notification: PDF + Telegram.
+ *
+ * Chạy trên queue "notifications" — TÁCH BIỆT hoàn toàn khỏi luồng cào.
+ * Nhận Company object, tự lấy TelegramConfig active để gửi.
  */
 class ProcessCompanyNotification implements ShouldQueue
 {
@@ -27,73 +28,50 @@ class ProcessCompanyNotification implements ShouldQueue
 
     public function backoff(): array
     {
-        return [10, 30, 60];
+        return [5, 15, 30];
     }
-
-    private Company $company;
-    private ?Filter $filter;
-    private ?TelegramConfig $directTelegramConfig;
 
     public function __construct(
-        Company $company,
-        Filter|TelegramConfig|null $target = null,
+        private readonly Company $company,
     ) {
-        $this->company = $company;
-        $this->filter = $target instanceof Filter ? $target : null;
-        $this->directTelegramConfig = $target instanceof TelegramConfig ? $target : null;
         $this->onQueue('notifications');
-    }
-
-    /**
-     * Static helper: dispatch cho DN mới (gửi trực tiếp, không qua filter).
-     */
-    public static function dispatchNewCompany(Company $company, TelegramConfig $config): void
-    {
-        static::dispatch($company, $config);
-    }
-
-    /**
-     * Static helper: dispatch cho DN match filter.
-     */
-    public static function dispatchForFilter(Company $company, Filter $filter): void
-    {
-        static::dispatch($company, $filter);
     }
 
     public function handle(PdfService $pdfService, TelegramService $telegramService): void
     {
-        // Xác định Telegram config
-        $telegramConfig = $this->directTelegramConfig
-            ?? $this->filter?->telegramConfig;
+        // Lấy Telegram config active
+        $telegramConfig = TelegramConfig::where('is_active', true)->first();
 
-        if (!$telegramConfig || !$telegramConfig->is_active) {
+        if (!$telegramConfig) {
             Log::warning('ProcessCompanyNotification: No active Telegram config', [
                 'mst' => $this->company->mst,
             ]);
             return;
         }
 
+        // Chỉ gửi DN có SĐT
+        if (empty($this->company->phone)) {
+            return;
+        }
+
         $pdfPath = null;
 
         try {
-            // Step 1: Tạo PDF
+            // Step 1: Render PDF
             $pdfPath = $pdfService->generateCompanyPdf($this->company);
-
-            Log::info('ProcessCompanyNotification: PDF generated', [
-                'mst' => $this->company->mst,
-            ]);
 
             // Step 2: Gửi Telegram
             $sent = $telegramService->sendDocument($pdfPath, $telegramConfig, $this->company);
 
             if ($sent) {
                 $this->company->update(['notification_sent' => true]);
+
                 Log::info('ProcessCompanyNotification: Sent OK', [
                     'mst' => $this->company->mst,
                     'chat_id' => $telegramConfig->chat_id,
                 ]);
             } else {
-                throw new \RuntimeException("Telegram failed for MST {$this->company->mst}");
+                throw new \RuntimeException("Telegram send failed for MST {$this->company->mst}");
             }
         } catch (\Throwable $e) {
             Log::error('ProcessCompanyNotification: Failed', [
