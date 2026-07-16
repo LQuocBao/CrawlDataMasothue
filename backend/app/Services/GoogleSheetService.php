@@ -16,6 +16,7 @@ class GoogleSheetService
 
     /**
      * Ghi 1 DN vào Google Sheet.
+     * Bao gồm cột "Nguồn" để khách phân biệt dữ liệu từ trang nào.
      */
     public function appendCompany(Company $company): bool
     {
@@ -36,6 +37,7 @@ class GoogleSheetService
                 'operation_date' => $company->operation_date?->format('d/m/Y') ?? '',
                 'industry' => $primaryIndustry,
                 'province' => $company->province ?? '',
+                'source' => $company->source_label,
                 'time' => now()->format('H:i:s'),
             ]);
 

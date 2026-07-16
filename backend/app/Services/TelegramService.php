@@ -80,14 +80,15 @@ class TelegramService
 
     /**
      * Build caption for the Telegram message.
-     * Chỉ hiện: Tên DN, MST, SĐT. Không emoji, không tiêu đề thừa.
+     * Hiện: Tên DN, MST, SĐT, Ngày TL, Nguồn dữ liệu.
      */
     private function buildCaption(Company $company): string
     {
         $caption = "{$company->name}\n";
         $caption .= "MST: {$company->mst}\n";
         $caption .= "SĐT: {$company->phone}\n";
-        $caption .= "Ngày TL: " . ($company->operation_date ? $company->operation_date->format('d/m/Y') : ($company->registration_date ? $company->registration_date->format('d/m/Y') : 'N/A'));
+        $caption .= "Ngày TL: " . ($company->operation_date ? $company->operation_date->format('d/m/Y') : ($company->registration_date ? $company->registration_date->format('d/m/Y') : 'N/A')) . "\n";
+        $caption .= "Nguồn: {$company->source_label}";
 
         return $caption;
     }

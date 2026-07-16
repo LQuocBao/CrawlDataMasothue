@@ -154,6 +154,12 @@
             <span class="status-active">{{ $company->status ?? 'Đang hoạt động' }}</span>
         </div>
 
+        {{-- Nguồn dữ liệu --}}
+        <div class="status-line">
+            <span class="info-label">Nguồn dữ liệu:</span>
+            <span class="info-value">{{ $company->source_label }}</span>
+        </div>
+
         {{-- Section 1: Thông tin chung --}}
         <div class="section-title">1. Thông tin chung</div>
 

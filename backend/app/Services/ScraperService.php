@@ -387,14 +387,37 @@ class ScraperService
         try {
             return Company::create([
                 ...$data,
+                'source' => Company::SOURCE_MASOTHUE,
                 'scraped_at' => now(),
             ]);
         } catch (\Illuminate\Database\QueryException $e) {
-            // Unique constraint violation = duplicate (race condition)
+            // Unique constraint violation = DN đã tồn tại (có thể từ tramasothue)
             if ($e->getCode() === '23000') {
-                Log::debug("ScraperService: Duplicate MST caught by DB constraint", [
-                    'mst' => $data['mst'],
-                ]);
+                // Tìm DN đã có → merge source + bổ sung field trống
+                $existing = Company::where('mst', $data['mst'])->first();
+
+                if ($existing) {
+                    // Merge source: tramasothue → both
+                    $existing->mergeSource(Company::SOURCE_MASOTHUE);
+
+                    // Bổ sung field trống từ masothue (nếu tramasothue thiếu)
+                    $fieldsToMerge = [];
+                    foreach (['phone', 'address', 'representative', 'international_name', 'short_name', 'managing_tax_authority'] as $field) {
+                        if (empty($existing->$field) && !empty($data[$field])) {
+                            $fieldsToMerge[$field] = $data[$field];
+                        }
+                    }
+                    if (!empty($fieldsToMerge)) {
+                        $existing->update($fieldsToMerge);
+                    }
+
+                    Log::info("ScraperService: Merged source for existing MST", [
+                        'mst' => $data['mst'],
+                        'new_source' => $existing->source,
+                        'merged_fields' => array_keys($fieldsToMerge),
+                    ]);
+                }
+
                 return null;
             }
             throw $e;
