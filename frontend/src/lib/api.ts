@@ -122,3 +122,29 @@ export async function testTelegramConfig(
 ): Promise<{ success: boolean; message: string }> {
   return request(`/telegram-configs/${id}/test`, { method: 'POST' });
 }
+
+// ─── Settings ───────────────────────────────────────────────────────────────
+
+import type { AppSetting, SettingsUpdatePayload } from '@/types';
+
+export async function fetchSettings(): Promise<ApiResponse<AppSetting[]>> {
+  return request<ApiResponse<AppSetting[]>>('/settings');
+}
+
+export async function updateSettings(
+  data: SettingsUpdatePayload
+): Promise<ApiResponse<AppSetting[]>> {
+  return request<ApiResponse<AppSetting[]>>('/settings', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function testSheetConnection(
+  url?: string
+): Promise<{ success: boolean; message: string }> {
+  return request('/settings/test-sheet', {
+    method: 'POST',
+    body: JSON.stringify({ url }),
+  });
+}

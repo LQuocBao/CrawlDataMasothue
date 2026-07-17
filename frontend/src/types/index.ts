@@ -96,3 +96,16 @@ export interface ApiResponse<T> {
   data: T;
   message?: string;
 }
+
+export interface AppSetting {
+  id: number;
+  key: string;
+  value: string | null;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SettingsUpdatePayload {
+  settings: Record<string, string | null>;
+}
