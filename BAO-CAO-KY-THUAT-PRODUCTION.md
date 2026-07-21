@@ -1,388 +1,224 @@
-# Báo cáo Kỹ thuật - Hệ thống Cào Dữ liệu MaSoThue
+# Báo cáo Kỹ thuật - Hệ thống Cào Dữ liệu Doanh nghiệp
 
-## 1. Tổng quan dự án
+> Cập nhật: Branch `refactor/bus-chain` - Kiến trúc Bus::chain + Dual-source
+
+---
+
+## 1. Tổng quan
 
 ### Mục đích
-Hệ thống tự động cào dữ liệu doanh nghiệp mới đăng ký từ `masothue.com`, xuất PDF báo cáo, và gửi thông báo real-time qua Telegram khi phát hiện doanh nghiệp mới có số điện thoại. Đồng thời lưu trữ toàn bộ dữ liệu vào Google Sheets theo ngày.
+Hệ thống tự động cào dữ liệu doanh nghiệp mới đăng ký từ **2 nguồn** (`masothue.com` + `tramasothue.com.vn`), xuất PDF báo cáo, gửi thông báo Telegram, và lưu trữ vào Google Sheets.
 
 ### Yêu cầu nghiệp vụ
-- Phát hiện doanh nghiệp mới trong vòng **< 4 phút** từ khi xuất hiện trên masothue.com
-- Chỉ gửi Telegram cho doanh nghiệp **có số điện thoại hợp lệ** (≥ 10 số)
-- Ghi **tất cả** doanh nghiệp (có và không có SĐT) vào Google Sheets
-- PDF output theo mẫu cố định (header xanh `#163D8E`, bảng ngành nghề, trạng thái xanh lá `#079569`)
-- Lưu trữ Google Sheets 7 ngày, tự xóa tab cũ
+- Phát hiện doanh nghiệp mới trong vòng < 4 phút
+- Ghi **tất cả DN** (có/không SĐT) vào Google Sheets
+- Chỉ gửi Telegram cho DN **có SĐT hợp lệ** (10 số, bắt đầu bằng 0)
+- Phân biệt rõ nguồn dữ liệu (masothue.com / tramasothue.com.vn / cả hai)
+- Không gửi trùng khi cùng DN xuất hiện ở cả 2 trang
 
 ---
 
-## 2. Kiến trúc hệ thống
+## 2. Kiến trúc (Bus::chain + Queue Workers)
 
-### Tech Stack
-
-| Layer | Công nghệ |
-|---|---|
-| Backend | Laravel 12.x (PHP 8.3) |
-| Frontend | Next.js 14 (React, TypeScript, Tailwind CSS) |
-| Database | MySQL 8.0 |
-| Cache/Queue | Redis 7 |
-| PDF | barryvdh/laravel-dompdf 3.x |
-| Proxy | TMProxy.com (rotating IP, API-based) |
-| Notification | Telegram Bot API (sendDocument) |
-| Data Export | Google Sheets via Apps Script webhook |
-| Infrastructure | Docker Compose, VPS Ubuntu |
-
-### Luồng xử lý chính (Production Flow)
+### Luồng chính
 
 ```
-┌────────────────────────────────────────────────────────────────────┐
-│                    SCHEDULER CONTAINER                              │
-│         (while true; do php artisan scrape:companies; sleep 10)    │
-└────────────────────────┬───────────────────────────────────────────┘
-                         │
-                         ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                    ScraperService                                   │
-│  1. Gọi TMProxy API → lấy IP proxy hiện tại                      │
-│  2. GET masothue.com (qua proxy) → parse listing page             │
-│  3. Lọc DN đã có trong Redis cache (dedup) → chỉ giữ DN mới      │
-│  4. Với mỗi DN mới:                                               │
-│     a. GET detail page → parse thông tin (table-taxinfo + ngành)  │
-│     b. Lưu vào MySQL (companies table)                            │
-│     c. Đánh dấu MST vào Redis cache (30 ngày TTL)                │
-└────────────────────────┬───────────────────────────────────────────┘
-                         │
-                         ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                 ScrapeCompanies Command                             │
-│  Với mỗi DN mới trả về từ ScraperService:                         │
-│                                                                    │
-│  ┌─── GoogleSheetService::appendCompany() ◄── TẤT CẢ DN          │
-│  │    (gọi Apps Script webhook → ghi vào Google Sheet)            │
-│  │                                                                 │
-│  ├─── Kiểm tra: có SĐT hợp lệ (≥ 10 số)?                        │
-│  │        │                                                        │
-│  │        ├── KHÔNG → skip (không gửi Telegram)                   │
-│  │        │                                                        │
-│  │        └── CÓ → PdfService::generateCompanyPdf()               │
-│  │                  TelegramService::sendDocument()                │
-│  │                  Cleanup PDF file                               │
-│  │                  Update notification_sent = true                │
-│  └─────────────────────────────────────────────────────────────────│
-└────────────────────────────────────────────────────────────────────┘
+Scheduler (everyMinute, withoutOverlapping)
+    │
+    ▼ dispatch Bus::chain → Queue "scraping"
+    │
+    ├─ [1] RotateProxyJob
+    │       └─ Gọi TMProxy API → lưu IP vào Redis (TTL 5 phút)
+    │
+    ├─ [2] ScrapeMasothueJob
+    │       └─ GET masothue.com (qua proxy) → regex parse
+    │       └─ Dedup: Redis cache + DB unique constraint
+    │       └─ Lưu DB (source='masothue') + ghi Google Sheet
+    │       └─ DN có SĐT → dispatch ProcessCompanyNotification
+    │
+    └─ [3] ScrapeTramasothueJob
+            └─ GET tramasothue.com.vn → DomCrawler parse
+            └─ sleep(rand(1,3)) giữa mỗi request (chống WAF)
+            └─ Cross-source dedup: MST đã có → merge source, skip notify
+            └─ DN mới → lưu DB (source='tramasothue') + Sheet + Telegram
 ```
 
-### Lưu ý quan trọng về kiến trúc
-- **KHÔNG sử dụng Queue/Job cho luồng chính.** Lý do: giảm latency tối đa. Telegram được gửi đồng bộ (synchronous) ngay trong vòng lặp scrape. Mỗi DN mất ~2-3 giây (PDF + Telegram).
-- **KHÔNG sử dụng `Bus::chain`.** Flow là sequential loop đơn giản.
-- File `ProcessCompanyNotification.php` (Job) tồn tại trong codebase nhưng **không được sử dụng** trên production. Nó là phần code dự phòng nếu sau này cần chuyển sang async processing.
+### Tách biệt Notification
+
+```
+Queue "notifications" (song song, độc lập):
+    │
+    └─ ProcessCompanyNotification
+        ├─ PdfService::generateCompanyPdf()   → render A4 PDF (DomPDF)
+        ├─ TelegramService::sendDocument()    → upload PDF + caption
+        └─ Cleanup file PDF
+```
+
+### Tại sao Bus::chain?
+- **Tối ưu proxy:** 3 Job dùng chung 1 IP, không lãng phí rotation
+- **Tuần tự an toàn:** tramasothue chờ masothue xong → dedup cross-source chính xác
+- **Không block notification:** PDF/Telegram chạy song song trên queue riêng
 
 ---
 
-## 3. Cấu trúc codebase
+## 3. Tech Stack
 
-### Backend (`backend/`)
+| Layer | Công nghệ | Version |
+|-------|-----------|---------|
+| Backend | Laravel | 11.x |
+| Runtime | PHP | 8.3 |
+| Frontend | Next.js + TypeScript + Tailwind | 14.x |
+| Database | MySQL | 8.0 |
+| Cache/Queue | Redis | 7.x |
+| PDF | barryvdh/laravel-dompdf | 3.x |
+| HTML Parse | symfony/dom-crawler + css-selector | 7.x |
+| Proxy | TMProxy.com | API-based |
+| Notification | Telegram Bot API | sendDocument |
+| Sheet | Google Apps Script | Webhook |
+| Container | Docker Compose | 7 services |
+
+---
+
+## 4. Docker Containers (7 services)
+
+| # | Container | Command | Vai trò |
+|---|-----------|---------|---------|
+| 1 | mst-app | `php artisan serve` | Laravel API (:8000) |
+| 2 | mst-frontend | `npm run dev` | Dashboard (:3000) |
+| 3 | mst-scheduler | `schedule:run` loop | Trigger chain mỗi phút |
+| 4 | mst-worker-scraping | `queue:work --queue=scraping` | Xử lý chain tuần tự |
+| 5 | mst-worker-notifications | `queue:work --queue=notifications` | PDF + Telegram song song |
+| 6 | mst-mysql | MySQL 8.0 | Database |
+| 7 | mst-redis | Redis 7 Alpine | Cache + Queue broker |
+
+---
+
+## 5. Source Tracking + Dedup
+
+### Cột `source` trong bảng `companies`
+
+| Giá trị | Ý nghĩa |
+|---------|---------|
+| `masothue` | DN chỉ thấy ở masothue.com |
+| `tramasothue` | DN chỉ thấy ở tramasothue.com.vn |
+| `both` | DN xuất hiện ở cả 2 nguồn |
+
+### Logic Hướng C (First-write wins, second merges)
+
+1. **DN hoàn toàn mới** → lưu + Sheet + Telegram (nếu có SĐT)
+2. **DN trùng MST từ nguồn khác** → merge source='both' + bổ sung field trống + KHÔNG gửi lại
+3. **DN trùng MST cùng nguồn** → skip (Redis dedup, TTL 30 ngày)
+
+### Hiển thị nguồn cho khách hàng
+
+| Kênh | Format |
+|------|--------|
+| Google Sheet | Cột "Nguồn": `masothue.com` / `tramasothue.com.vn` / `cả hai` |
+| Telegram caption | Dòng `Nguồn: masothue.com` |
+| PDF | Section "Nguồn dữ liệu: ..." |
+
+---
+
+## 6. Cấu trúc codebase chính
 
 ```
-app/
+backend/app/
 ├── Console/Commands/
-│   ├── ScrapeCompanies.php      ← Entry point chính (scheduler gọi)
-│   ├── TestScrape.php           ← Command test thủ công
-│   ├── TestSendPdf.php          ← Command test PDF + Telegram
-│   └── DebugScrape.php          ← Command debug HTML structure
-│
-├── Services/
-│   ├── ScraperService.php       ← Logic cào data (HTTP client, proxy, parse HTML)
-│   ├── PdfService.php           ← Render PDF từ Blade template (DomPDF)
-│   ├── TelegramService.php      ← Gửi document qua Telegram Bot API
-│   ├── GoogleSheetService.php   ← Ghi data vào Google Sheet (Apps Script webhook)
-│   └── FilterService.php        ← Logic lọc DN theo bộ lọc người dùng
-│
-├── Models/
-│   ├── Company.php              ← Model DN (MST, tên, SĐT, địa chỉ, ngành nghề...)
-│   ├── TelegramConfig.php       ← Model cấu hình bot Telegram
-│   └── Filter.php               ← Model bộ lọc (tỉnh, ngành, từ khóa)
-│
-├── Http/Controllers/Api/
-│   ├── CompanyController.php    ← API: danh sách DN, thống kê dashboard
-│   ├── FilterController.php     ← API: CRUD bộ lọc
-│   ├── TelegramConfigController.php ← API: CRUD cấu hình Telegram
-│   └── GoogleSheetController.php    ← API: danh sách sheets theo ngày
-│
+│   └── RunScraperChain.php         ← php artisan scraper:run
 ├── Jobs/
-│   └── ProcessCompanyNotification.php ← (KHÔNG dùng trên production)
-│
-└── Providers/
-    └── AppServiceProvider.php
-
-config/
-└── scraper.php                  ← Config: proxy, TMProxy key, Google Drive, intervals
-
-database/migrations/
-├── create_telegram_configs_table
-├── create_companies_table
-├── create_filters_table
-├── add_date_phone_filters_to_filters_table
-└── create_jobs_table
-
-resources/views/pdf/
-└── company-report.blade.php     ← Template PDF (Blade + inline CSS)
-
-routes/
-├── api.php                      ← REST API routes (prefix /api/v1)
-└── console.php                  ← Scheduler registration
-```
-
-### Frontend (`frontend/`)
-
-```
-src/
-├── app/(dashboard)/
-│   ├── page.tsx                 ← Dashboard (thống kê)
-│   ├── filters/page.tsx         ← Quản lý bộ lọc
-│   ├── telegram/page.tsx        ← Quản lý Telegram config
-│   ├── sheets/page.tsx          ← Danh sách Google Sheets
-│   ├── layout.tsx               ← Layout chung (sidebar + main)
-│   └── loading.tsx              ← Loading skeleton
-│
-├── components/
-│   ├── Sidebar.tsx
-│   ├── DashboardContent.tsx
-│   ├── FilterManager.tsx
-│   ├── TelegramManager.tsx
-│   └── SheetsManager.tsx
-│
-├── lib/
-│   ├── api.ts                   ← HTTP client gọi backend API
-│   └── utils.ts                 ← Helpers (cn, formatDate...)
-│
-└── types/
-    └── index.ts                 ← TypeScript interfaces
+│   ├── RotateProxyJob.php          ← TMProxy → Redis cache
+│   ├── ScrapeMasothueJob.php       ← Cào + source tracking
+│   ├── ScrapeTramasothueJob.php    ← Cào + cross-source dedup
+│   └── ProcessCompanyNotification.php ← PDF + Telegram
+├── Services/
+│   ├── ScraperService.php          ← Parse masothue.com (regex)
+│   ├── TraMaSoThueScraperService.php ← Parse tramasothue (DomCrawler)
+│   ├── PdfService.php              ← DomPDF render
+│   ├── TelegramService.php         ← Bot API
+│   └── GoogleSheetService.php      ← Apps Script webhook
+├── Models/
+│   ├── Company.php                 ← source, mergeSource(), source_label
+│   ├── AppSetting.php             ← Key-value config (Sheet URL)
+│   ├── TelegramConfig.php
+│   └── Filter.php
+└── Http/Controllers/Api/
+    ├── SettingsController.php      ← Dashboard cài đặt
+    └── ...
 ```
 
 ---
 
-## 4. Database Schema
+## 7. API Endpoints
 
-### `companies` table
-| Cột | Type | Mô tả |
-|---|---|---|
-| id | bigint PK | |
-| mst | varchar(20) UNIQUE | Mã số thuế |
-| name | varchar | Tên doanh nghiệp |
-| international_name | varchar nullable | Tên quốc tế |
-| short_name | varchar nullable | Tên viết tắt / Loại hình DN |
-| address | text nullable | Địa chỉ đăng ký |
-| province | varchar(100) nullable | Tỉnh/TP (extract từ address) |
-| district | varchar(100) nullable | Quận/Huyện |
-| representative | varchar nullable | Người đại diện pháp luật |
-| phone | varchar(20) nullable | Số điện thoại |
-| registration_date | date nullable | Ngày cấp GCN |
-| operation_date | date nullable | Ngày hoạt động |
-| status | varchar(50) | Trạng thái (Đang hoạt động...) |
-| industries | JSON nullable | Mảng ngành nghề [{code, description, is_primary}] |
-| managing_tax_authority | varchar nullable | Cơ quan thuế quản lý |
-| notification_sent | boolean | Đã gửi Telegram chưa |
-| scraped_at | timestamp | Thời điểm quét |
-
-### `telegram_configs` table
-| Cột | Type | Mô tả |
-|---|---|---|
-| id | bigint PK | |
-| name | varchar | Tên config |
-| bot_token | varchar | Telegram Bot API token |
-| chat_id | varchar | Chat/Group ID |
-| is_active | boolean | Đang sử dụng |
-
-### `filters` table
-| Cột | Type | Mô tả |
-|---|---|---|
-| id | bigint PK | |
-| name | varchar | Tên bộ lọc |
-| provinces | JSON nullable | Danh sách tỉnh |
-| industry_keywords | JSON nullable | Từ khóa ngành |
-| industry_codes | JSON nullable | Mã ngành VSIC |
-| registration_days_back | smallint nullable | Lọc N ngày gần nhất |
-| require_phone | boolean | Yêu cầu có SĐT |
-| telegram_config_id | FK nullable | Gửi thông báo đến config nào |
+| Method | Endpoint | Mô tả |
+|--------|----------|--------|
+| GET | /api/v1/companies/stats | Thống kê dashboard |
+| GET | /api/v1/companies | Danh sách DN (paginated) |
+| CRUD | /api/v1/filters | Quản lý bộ lọc |
+| CRUD | /api/v1/telegram-configs | Quản lý Telegram bot |
+| POST | /api/v1/telegram-configs/{id}/test | Test kết nối |
+| GET/PUT | /api/v1/settings | Cài đặt hệ thống |
+| POST | /api/v1/settings/test-sheet | Test Google Sheet |
+| GET | /api/v1/sheets | Danh sách sheets |
 
 ---
 
-## 5. Chi tiết các Service
+## 8. Latency Budget
 
-### ScraperService
-- **Nhiệm vụ:** Cào HTML từ masothue.com, parse thông tin DN
-- **Proxy:** Tích hợp TMProxy API (`get-current-proxy` / `get-new-proxy`), tự xoay IP mỗi 4 phút
-- **Anti-duplicate:** Redis SET (`scraped_mst:{MST}`, TTL 30 ngày) + MySQL UNIQUE constraint
-- **Parse HTML:**
-  - Listing page: regex `href='/MST-slug'` → extract danh sách DN mới
-  - Detail page: `table.table-taxinfo` → extract fields
-  - Industries: `<td><a>CODE</a></td><td><a>Description</a></td>` pattern
-- **User-Agent rotation:** 5 browser strings ngẫu nhiên
-
-### PdfService
-- **Thư viện:** `barryvdh/laravel-dompdf` 3.x
-- **Template:** `resources/views/pdf/company-report.blade.php`
-- **Output:** A4 portrait, font DejaVu Sans (Unicode Vietnamese)
-- **Naming:** `{TEN_DN_KHONG_DAU}.pdf` (sanitize tiếng Việt → uppercase + underscore)
-- **Cleanup:** File PDF bị xóa sau khi gửi Telegram thành công
-
-### TelegramService
-- **API:** `https://api.telegram.org/bot{TOKEN}/sendDocument`
-- **Caption format:**
-  ```
-  TÊN CÔNG TY
-  MST: 0123456789
-  SĐT: 0912345678
-  Ngày TL: 07/07/2026
-  ```
-- **File name trên Telegram:** `CONG_TY_TNHH_....pdf` (không dấu, underscore)
-- **Validation:** `verifyBotToken()` kiểm tra token hợp lệ
-
-### GoogleSheetService
-- **Phương pháp:** HTTP POST tới Google Apps Script webhook
-- **URL:** `https://script.google.com/macros/s/AKfycby.../exec`
-- **Apps Script tự động:**
-  - Tạo tab mới mỗi ngày (format `dd-MM-yyyy`)
-  - Header xanh đậm + filter + freeze row 1
-  - Cột MST và SĐT format Plain Text (không bị mất số 0)
-  - Xóa tab cũ > 7 ngày
-- **Data ghi:** TẤT CẢ DN (có SĐT và không có SĐT)
+| Bước | Thời gian | Ghi chú |
+|------|-----------|---------|
+| Scheduler trigger | 0-60s | everyMinute, withoutOverlapping |
+| RotateProxyJob | ~1s | API call TMProxy |
+| ScrapeMasothueJob (listing + details) | 3-10s | Tùy số DN mới |
+| ScrapeTramasothueJob | 5-30s | sleep(1-3s) mỗi DN |
+| Google Sheet webhook | ~1s/DN | POST HTTP |
+| ProcessCompanyNotification (PDF) | 1-2s | DomPDF render |
+| ProcessCompanyNotification (Telegram) | 1-2s | sendDocument |
+| **Tổng worst case** | **~60-90s** | Nằm trong budget 4 phút |
 
 ---
 
-## 6. Deployment (Production)
+## 9. Cách mở rộng: Thêm source cào mới
 
-### Infrastructure
-- **VPS:** Vietnix, Ubuntu 20.04, IP `222.255.214.169`
-- **Docker Compose:** 6 containers
-- **Proxy:** TMProxy.com (IPv4, rotating, API key-based)
-
-### Docker Containers
-
-| Container | Image | Vai trò | Port |
-|---|---|---|---|
-| mst-app | PHP 8.3 FPM Alpine | Laravel API server | 8000 |
-| mst-frontend | Node 20 Alpine | Next.js dashboard | 3000 |
-| mst-scheduler | PHP 8.3 FPM Alpine | Scraper loop (10s interval) | - |
-| mst-worker | PHP 8.3 FPM Alpine | Queue worker (backup) | - |
-| mst-mysql | MySQL 8.0 | Database | 3306 |
-| mst-redis | Redis 7 Alpine | Cache + Queue broker | 6379 |
-
-### Scheduler Command
-```bash
-# Container mst-scheduler chạy:
-while true; do php artisan scrape:companies; sleep 10; done
-```
-
-### Biến môi trường Production (.env)
-```env
-APP_ENV=production
-APP_DEBUG=false
-
-DB_HOST=mysql
-DB_DATABASE=masothue_scraper
-DB_USERNAME=scraper
-DB_PASSWORD=***
-
-REDIS_HOST=redis
-QUEUE_CONNECTION=redis
-CACHE_DRIVER=redis
-
-SCRAPER_BASE_URL=https://masothue.com
-SCRAPER_TMPROXY_KEY=32b34a823a0f86dbf...
-SCRAPER_MAX_PER_RUN=50
-```
-
----
-
-## 7. Latency Budget
-
-| Bước | Thời gian |
-|---|---|
-| Scheduler trigger (worst case) | 0-10 giây |
-| Fetch listing page (qua proxy) | ~1 giây |
-| Check dedup Redis (skip DN cũ) | <1ms/DN |
-| Fetch detail page DN mới | ~1-2 giây |
-| Ghi Google Sheet (webhook) | ~1 giây |
-| Render PDF (DomPDF) | ~1 giây |
-| Gửi Telegram (sendDocument) | ~1-2 giây |
-| **Tổng worst case** | **~15-20 giây** |
-
----
-
-## 8. Cách mở rộng: Thêm source cào mới
-
-Để tích hợp thêm 1 trang web khác (VD: `dangkykinhdoanh.gov.vn`), cần:
-
-### Bước 1: Tạo Service mới
-```php
-// app/Services/DkkdScraperService.php
-class DkkdScraperService
-{
-    public function scrapeLatest(): array
-    {
-        // 1. Fetch listing page từ source mới
-        // 2. Parse HTML → extract danh sách DN mới
-        // 3. Check dedup (Redis cache)
-        // 4. Fetch detail → parse → store Company model
-        // 5. Return array of new Company objects
-    }
-}
-```
-
-### Bước 2: Tạo Command mới hoặc sửa ScrapeCompanies
-```php
-// Option A: Command riêng
-// app/Console/Commands/ScrapeDkkd.php
-
-// Option B: Thêm vào ScrapeCompanies (multi-source)
-```
-
-### Bước 3: Đăng ký scheduler
-```yaml
-# docker-compose.yml - thêm container scheduler mới
-dkkd-scheduler:
-  command: sh -c "while true; do php artisan scrape:dkkd; sleep 10; done"
-```
+### Những gì CẦN tạo:
+1. `Services/NewSourceScraperService.php` — parse HTML nguồn mới
+2. `Jobs/ScrapeNewSourceJob.php` — job cào, dùng `storeWithSourceTracking()`
+3. Thêm constant `SOURCE_NEWSOURCE` vào `Company.php`
+4. Thêm Job vào Bus::chain trong `RunScraperChain.php`
 
 ### Những gì KHÔNG cần thay đổi:
-- `PdfService` — template PDF có thể tái sử dụng hoặc tạo template mới
-- `TelegramService` — gửi document, không phụ thuộc source
-- `GoogleSheetService` — webhook chung, chỉ cần truyền Company object
-- Database schema `companies` — đủ generic cho mọi source
-- Frontend dashboard — đọc từ `companies` table, tự hiện
-
-### Những gì CẦN thêm:
-- Service scraper mới (parse HTML khác)
-- Config `.env` cho source mới (URL, proxy settings)
-- Có thể thêm cột `source` vào `companies` table để phân biệt
+- PdfService, TelegramService, GoogleSheetService — tái sử dụng
+- ProcessCompanyNotification — nhận Company object, không quan tâm source
+- Frontend Dashboard — đọc từ `companies` table, tự hiện
+- Database schema — cột `source` đủ generic
 
 ---
 
-## 9. Monitoring & Troubleshooting
+## 10. Deployment
 
+### VPS hiện tại
+| Môi trường | IP | Branch |
+|------------|-------|--------|
+| Production (khách) | 222.255.214.169 | main (arch cũ) |
+| Staging (test) | 14.225.205.98 | refactor/bus-chain |
+
+### Deploy 1 lệnh
 ```bash
-# Xem trạng thái containers
-docker compose ps
-
-# Xem log scraper realtime
-docker compose logs scheduler -f --tail=20
-
-# Xem DN mới nhất trong DB
-docker compose exec app php artisan test:scrape --limit=0 --skip-pdf --skip-telegram
-
-# Restart nếu bị crash
-docker compose restart scheduler app
-
-# Kiểm tra proxy đang dùng IP nào
-curl "https://tmproxy.com/api/proxy/get-current-proxy?api_key=API_KEY"
+curl -fsSL https://raw.githubusercontent.com/LQuocBao/CrawlDataMasothue/refactor/bus-chain/deploy-staging.sh | bash
 ```
 
+### Bàn giao khách mới
+Chỉ cần đổi 2 thứ trên Dashboard:
+1. `/settings` → Google Sheet webhook URL mới
+2. `/telegram` → Chat ID group mới
+
 ---
 
-## 10. Giới hạn đã biết
+## 11. Monitoring
 
-1. **masothue.com cache listing page** — DN mới có thể mất 2-5 phút mới hiện trên trang chính
-2. **TMProxy đổi IP tối thiểu 4 phút** — nếu bị block giữa chừng phải đợi hết 4 phút
-3. **DomPDF không hỗ trợ font phức tạp** — một số ký tự đặc biệt có thể không render đẹp
-4. **Google Apps Script quota** — tối đa ~20,000 calls/ngày (đủ cho ~2,800 DN/ngày)
-5. **Không có auth** trên dashboard — ai có IP VPS đều truy cập được (nên thêm middleware auth nếu cần)
+```bash
+docker compose ps                                    # Trạng thái containers
+docker compose logs worker-scraping --tail=20 -f     # Log chain
+docker compose logs worker-notifications --tail=10   # Log PDF/Telegram
+docker compose exec app php artisan queue:failed     # Jobs lỗi
+```

@@ -1,276 +1,179 @@
 # Hướng dẫn Test trên môi trường Dev
 
-## Mục lục
-
-1. [Khởi động môi trường](#1-khởi-động-môi-trường)
-2. [Kiểm tra hệ thống hoạt động](#2-kiểm-tra-hệ-thống-hoạt-động)
-3. [Test Scraper thủ công](#3-test-scraper-thủ-công)
-4. [Cấu hình Telegram Bot](#4-cấu-hình-telegram-bot)
-5. [Tạo bộ lọc](#5-tạo-bộ-lọc-với-điều-kiện-ngày--sđt)
-6. [Test toàn luồng end-to-end](#6-test-toàn-luồng-end-to-end)
-7. [Xem logs & debug](#7-xem-logs--debug)
-8. [Dọn dẹp & reset](#8-dọn-dẹp--reset)
+> Dành cho developer muốn chạy và test hệ thống trên máy local.
 
 ---
 
 ## 1. Khởi động môi trường
 
 ### Yêu cầu
-
-- Docker Desktop đã cài đặt và đang chạy
+- Docker Desktop đang chạy
 - Git
-- (Tùy chọn) PHP 8.2+, Composer, Node.js 20+ nếu muốn chạy không qua Docker
 
-### Cách 1: Chạy bằng Docker (khuyến nghị)
+### Khởi động (Docker)
 
 ```bash
-# Bạn đang ở thư mục CrawlDataMasothue rồi, chỉ cần copy file cấu hình
-copy .env.docker .env
-cd backend && copy .env.example .env && cd ..
-cd frontend && copy .env.local.example .env.local && cd ..
+# Clone repo (nếu chưa có)
+git clone -b refactor/bus-chain https://github.com/LQuocBao/CrawlDataMasothue.git
+cd CrawlDataMasothue
 
-# Khởi động tất cả services
+# Copy env
+cp backend/.env.example backend/.env
+
+# Khởi động 7 containers
 docker compose up -d
 
-# Đợi MySQL sẵn sàng (~10 giây)
-timeout /t 10
+# Đợi MySQL ready (~15s)
+sleep 15
 
-# Tạo APP_KEY + chạy migrations
+# Setup Laravel
 docker compose exec app php artisan key:generate
 docker compose exec app php artisan migrate
-docker compose exec app php artisan db:seed
 ```
 
-### Cách 2: Chạy thủ công (không Docker)
+### Kiểm tra containers
 
-**Terminal 1 - Backend:**
 ```bash
-cd backend
-composer install
-copy .env.example .env
-php artisan key:generate
-# Sửa DB_HOST, DB_USERNAME, DB_PASSWORD trong .env cho đúng MySQL local
-php artisan migrate
-php artisan db:seed
-php artisan serve
+docker compose ps
 ```
 
-**Terminal 2 - Queue Worker:**
-```bash
-cd backend
-php artisan queue:work database --queue=notifications,default --sleep=2 --tries=3
-```
+Phải thấy 7 containers `Up`:
+- mst-app (API :8000)
+- mst-frontend (Dashboard :3000)
+- mst-scheduler
+- mst-worker-scraping
+- mst-worker-notifications
+- mst-mysql
+- mst-redis
 
-**Terminal 3 - Frontend:**
-```bash
-cd frontend
-npm install
-npm run dev
-```
+### Truy cập
+
+| Service | URL |
+|---------|-----|
+| Dashboard | http://localhost:3000 |
+| API | http://localhost:8000 |
+| API stats | http://localhost:8000/api/v1/companies/stats |
 
 ---
 
-## 2. Kiểm tra hệ thống hoạt động
+## 2. Kiến trúc hoạt động (trên dev)
 
-### Kiểm tra API
-
-```bash
-# Lấy thống kê (nếu trả về JSON = OK)
-curl http://localhost:8000/api/v1/companies/stats
-
-# Lấy danh sách filters (sẽ thấy 3 filter từ seeder)
-curl http://localhost:8000/api/v1/filters
+```
+Scheduler (mỗi 1 phút)
+  → dispatch Bus::chain lên queue "scraping"
+  → worker-scraping xử lý tuần tự:
+      1. RotateProxyJob (skip nếu không có TMProxy key)
+      2. ScrapeMasothueJob
+      3. ScrapeTramasothueJob
+  → DN mới → dispatch ProcessCompanyNotification lên queue "notifications"
+  → worker-notifications xử lý: PDF + Telegram
 ```
 
-### Kiểm tra Frontend
-
-Mở trình duyệt → http://localhost:3000
-
-Bạn sẽ thấy:
-- Dashboard với số liệu thống kê
-- Menu bên trái: Dashboard / Bộ lọc / Telegram
+**Trên dev không có proxy**: `RotateProxyJob` sẽ log "No TMProxy key, running without proxy" và các job scrape sẽ gọi trực tiếp (có thể bị block sau vài giờ).
 
 ---
 
 ## 3. Test Scraper thủ công
 
-### Chạy dry-run (không lưu DB, không gửi thông báo)
+### Dispatch chain 1 lần
 
 ```bash
-# Docker:
-docker compose exec app php artisan scrape:companies --dry-run
+docker compose exec app php artisan scraper:run
+```
 
-# Không Docker:
-cd backend && php artisan scrape:companies --dry-run
+### Xem log chain xử lý
+
+```bash
+docker compose logs worker-scraping --tail=20
 ```
 
 Kết quả mong đợi:
 ```
-Starting company scrape...
-Found X new companies.
-  [DRY-RUN] Match: 0123456789 -> Filter: DN Hà Nội - CNTT
-Completed in 5.2s. Scraped: X, Matched: Y, Jobs dispatched: 0
+RotateProxyJob ................ DONE
+ScrapeMasothueJob ............. DONE
+ScrapeTramasothueJob .......... DONE
 ```
 
-### Chạy thật (lưu DB + dispatch jobs)
+### Xem DN đã cào được
 
 ```bash
-docker compose exec app php artisan scrape:companies
+docker compose exec app php artisan tinker --execute="echo App\Models\Company::count() . ' companies in DB';"
 ```
 
-> ⚠️ **Lưu ý:** Trên dev không có proxy, nếu masothue.com chặn IP thì scraper sẽ không lấy được data. Trong trường hợp đó, dùng cách fake data bên dưới.
+---
 
-### Fake data để test (không cần scrape thật)
+## 4. Fake data để test (không cần scrape thật)
 
-Tạo file `backend/database/seeders/FakeCompanySeeder.php`:
-
-```bash
-docker compose exec app php artisan make:seeder FakeCompanySeeder
-```
-
-Rồi chạy lệnh tinker để tạo data giả:
+Nếu bị block IP hoặc muốn test nhanh:
 
 ```bash
 docker compose exec app php artisan tinker
 ```
 
-Trong tinker, paste đoạn sau:
+Paste vào tinker:
 
 ```php
 use App\Models\Company;
 
-// DN có SĐT + đăng ký hôm nay (sẽ match filter)
+// DN từ masothue, có SĐT (sẽ gửi Telegram)
 Company::create([
     'mst' => '0109876543',
-    'name' => 'CÔNG TY TNHH CÔNG NGHỆ ABC',
-    'address' => '123 Trần Duy Hưng, Cầu Giấy, Thành phố Hà Nội',
-    'province' => 'Hà Nội',
-    'district' => 'Cầu Giấy',
-    'representative' => 'Nguyễn Văn A',
+    'name' => 'CONG TY TNHH CONG NGHE ABC',
+    'source' => 'masothue',
+    'address' => '123 Tran Duy Hung, Cau Giay, Ha Noi',
+    'province' => 'Ha Noi',
+    'representative' => 'Nguyen Van A',
     'phone' => '0901234567',
-    'registration_date' => now()->format('Y-m-d'),
-    'status' => 'Đang hoạt động',
+    'operation_date' => now(),
+    'status' => 'Dang hoat dong',
     'industries' => [
-        ['code' => '6201', 'description' => 'Lập trình máy vi tính', 'is_primary' => true],
-        ['code' => '6202', 'description' => 'Tư vấn máy vi tính và quản trị hệ thống máy vi tính', 'is_primary' => false],
-        ['code' => '4651', 'description' => 'Bán buôn máy vi tính, thiết bị ngoại vi và phần mềm', 'is_primary' => false],
+        ['code' => '6201', 'description' => 'Lap trinh may vi tinh', 'is_primary' => true],
+        ['code' => '6202', 'description' => 'Tu van may vi tinh', 'is_primary' => false],
     ],
     'scraped_at' => now(),
 ]);
 
-// DN không có SĐT (sẽ KHÔNG match nếu require_phone = true)
+// DN từ tramasothue, không có SĐT (chỉ vào Sheet, không Telegram)
 Company::create([
     'mst' => '0109876544',
-    'name' => 'CÔNG TY CP THƯƠNG MẠI XYZ',
-    'address' => '456 Nguyễn Trãi, Thanh Xuân, Thành phố Hà Nội',
-    'province' => 'Hà Nội',
-    'district' => 'Thanh Xuân',
-    'representative' => 'Trần Thị B',
+    'name' => 'CONG TY CP THUONG MAI XYZ',
+    'source' => 'tramasothue',
+    'address' => '456 Nguyen Trai, Thanh Xuan, Ha Noi',
+    'province' => 'Ha Noi',
+    'representative' => 'Tran Thi B',
     'phone' => null,
-    'registration_date' => now()->format('Y-m-d'),
-    'status' => 'Đang hoạt động',
+    'operation_date' => now(),
+    'status' => 'Dang hoat dong',
     'industries' => [
-        ['code' => '6201', 'description' => 'Lập trình máy vi tính', 'is_primary' => true],
+        ['code' => '4711', 'description' => 'Ban le trong sieu thi', 'is_primary' => true],
     ],
     'scraped_at' => now(),
 ]);
 
-// DN đăng ký 5 ngày trước (sẽ KHÔNG match nếu registration_days_back = 3)
-Company::create([
-    'mst' => '0109876545',
-    'name' => 'CÔNG TY TNHH PHẦN MỀM DEF',
-    'address' => '789 Lê Văn Lương, Nam Từ Liêm, Thành phố Hà Nội',
-    'province' => 'Hà Nội',
-    'district' => 'Nam Từ Liêm',
-    'representative' => 'Lê Văn C',
-    'phone' => '0912345678',
-    'registration_date' => now()->subDays(5)->format('Y-m-d'),
-    'status' => 'Đang hoạt động',
-    'industries' => [
-        ['code' => '6201', 'description' => 'Lập trình máy vi tính', 'is_primary' => true],
-    ],
-    'scraped_at' => now()->subDays(5),
-]);
-
-echo "Đã tạo 3 DN test!\n";
+echo "Da tao 2 DN test!\n";
 ```
 
 ---
 
-## 4. Cấu hình Telegram Bot
+## 5. Cấu hình Telegram Bot (test)
 
-### Bước 1: Tạo Bot
+### Tạo bot test
 
-1. Mở Telegram, tìm `@BotFather`
-2. Gửi `/newbot`
-3. Đặt tên bot (VD: `MSTScraper Test Bot`)
-4. Sao chép **Bot Token** (dạng: `7123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxx`)
+1. Mở Telegram → tìm `@BotFather`
+2. Gửi `/newbot` → đặt tên → copy **Bot Token**
+3. Tạo group test → thêm bot vào
+4. Lấy Chat ID: mở `https://api.telegram.org/bot<TOKEN>/getUpdates`
 
-### Bước 2: Lấy Chat ID
-
-**Cách đơn giản nhất:**
-1. Tạo 1 group mới trên Telegram
-2. Thêm bot vào group
-3. Gửi 1 tin nhắn bất kỳ trong group
-4. Mở trình duyệt:
-   ```
-   https://api.telegram.org/bot<BOT_TOKEN>/getUpdates
-   ```
-5. Tìm `"chat":{"id":-100xxxxxxxxxx}` → đó là Chat ID
-
-### Bước 3: Cấu hình trong Dashboard
+### Cấu hình qua Dashboard
 
 1. Mở http://localhost:3000/telegram
-2. Bấm **"Thêm cấu hình"**
-3. Điền:
-   - Tên: `Test Group`
-   - Bot Token: (paste token từ BotFather)
-   - Chat ID: (paste Chat ID vừa lấy)
-   - ✅ Kích hoạt ngay
-4. Bấm **"Tạo cấu hình"**
-5. Bấm ⚡ (biểu tượng tia sét) để test kết nối
+2. Bấm "Thêm cấu hình"
+3. Điền Token + Chat ID
+4. Bấm test (biểu tượng tia sét)
 
 ---
 
-## 5. Tạo bộ lọc với điều kiện Ngày + SĐT
-
-### Qua Dashboard (http://localhost:3000/filters)
-
-1. Bấm **"Thêm bộ lọc"**
-2. Điền:
-   - **Tên bộ lọc:** `Test - HN CNTT 3 ngày`
-   - **Tỉnh/Thành phố:** `Hà Nội`
-   - **Từ khóa ngành nghề:** `công nghệ, phần mềm, lập trình`
-   - **Mã ngành:** `6201, 6202`
-   - **Ngày đăng ký:** `3` (lấy DN đăng ký trong 3 ngày qua)
-   - ✅ **Chỉ lấy DN có số điện thoại**
-   - **Gửi thông báo đến:** Chọn config Telegram vừa tạo
-   - ✅ **Kích hoạt bộ lọc**
-3. Bấm **"Tạo bộ lọc"**
-
-### Qua API (curl)
-
-```bash
-curl -X POST http://localhost:8000/api/v1/filters \
-  -H "Content-Type: application/json" \
-  -d "{\"name\":\"Test - HN CNTT 3 ngay\",\"provinces\":[\"Hà Nội\"],\"industry_keywords\":[\"công nghệ\",\"phần mềm\",\"lập trình\"],\"industry_codes\":[\"6201\",\"6202\"],\"registration_days_back\":3,\"require_phone\":true,\"is_active\":true,\"telegram_config_id\":1}"
-```
-
----
-
-## 6. Test toàn luồng end-to-end
-
-### Bước 1: Đảm bảo Queue Worker đang chạy
-
-```bash
-# Kiểm tra worker đang chạy:
-docker compose logs worker --tail=5
-
-# Nếu dùng manual:
-php artisan queue:work database --queue=notifications,default --sleep=2 --tries=3
-```
-
-### Bước 2: Chạy test FilterService (tinker)
+## 6. Test luồng PDF + Telegram
 
 ```bash
 docker compose exec app php artisan tinker
@@ -278,153 +181,90 @@ docker compose exec app php artisan tinker
 
 ```php
 use App\Models\Company;
-use App\Services\FilterService;
-
-$filterService = app(FilterService::class);
-
-// Lấy DN có SĐT + đăng ký hôm nay
-$company = Company::where('mst', '0109876543')->first();
-$matches = $filterService->getMatchingFilters($company);
-echo "DN có SĐT + ngày hôm nay: " . $matches->count() . " filter match\n";
-// Mong đợi: >= 1 filter match
-
-// Lấy DN không có SĐT
-$company2 = Company::where('mst', '0109876544')->first();
-$matches2 = $filterService->getMatchingFilters($company2);
-echo "DN không có SĐT: " . $matches2->count() . " filter match\n";
-// Mong đợi: 0 (bị loại vì require_phone)
-
-// Lấy DN đăng ký 5 ngày trước
-$company3 = Company::where('mst', '0109876545')->first();
-$matches3 = $filterService->getMatchingFilters($company3);
-echo "DN 5 ngày trước: " . $matches3->count() . " filter match\n";
-// Mong đợi: 0 (bị loại vì quá 3 ngày)
-```
-
-### Bước 3: Dispatch Job thủ công (test PDF + Telegram)
-
-```php
-use App\Models\Company;
-use App\Models\Filter;
 use App\Jobs\ProcessCompanyNotification;
 
-$company = Company::where('mst', '0109876543')->first();
-$filter = Filter::where('is_active', true)->whereNotNull('telegram_config_id')->first();
-
-// Dispatch job (queue worker sẽ xử lý)
-ProcessCompanyNotification::dispatch($company, $filter);
-echo "Job dispatched! Kiểm tra Telegram...\n";
+$company = Company::whereNotNull('phone')->latest()->first();
+ProcessCompanyNotification::dispatch($company)->onQueue('notifications');
+echo "Job dispatched! Check Telegram...\n";
 ```
 
-### Bước 4: Kiểm tra kết quả
-
-- ✅ Telegram group nhận được file PDF kèm caption
-- ✅ PDF có 2 phần: "Thông tin chung" + "Danh mục ngành nghề"
-- ✅ Company record có `notification_sent = true`
-
-Kiểm tra trong DB:
-```php
-Company::where('mst', '0109876543')->value('notification_sent');
-// Mong đợi: true
+Kiểm tra:
+```bash
+docker compose logs worker-notifications --tail=10
 ```
+
+Mong đợi: Telegram group nhận PDF với caption có dòng "Nguồn: masothue.com".
 
 ---
 
-## 7. Xem logs & debug
+## 7. Test Google Sheet
 
-### Logs chính
+### Cấu hình
 
-```bash
-# Scraper log
-docker compose exec app cat storage/logs/scraper.log
+1. Mở http://localhost:3000/settings
+2. Paste webhook URL Apps Script
+3. Bấm "Test kết nối" → phải hiện xanh "Thành công"
 
-# Laravel log (errors, info)
-docker compose exec app cat storage/logs/laravel.log
-
-# Queue worker log
-docker compose logs worker --tail=50
-
-# Scheduler log
-docker compose logs scheduler --tail=20
-```
-
-### Kiểm tra jobs trong queue
+### Test ghi DN vào Sheet
 
 ```bash
 docker compose exec app php artisan tinker
 ```
 
 ```php
-// Xem jobs đang chờ
-DB::table('jobs')->count();
-
-// Xem failed jobs
-DB::table('failed_jobs')->get();
-
-// Retry tất cả failed jobs
-// (exit tinker trước)
-```
-
-```bash
-docker compose exec app php artisan queue:failed
-docker compose exec app php artisan queue:retry all
-```
-
-### Kiểm tra PDF được tạo
-
-```bash
-docker compose exec app ls storage/app/pdfs/
+$company = App\Models\Company::latest()->first();
+$gs = app(App\Services\GoogleSheetService::class);
+$ok = $gs->appendCompany($company);
+echo $ok ? "SHEET OK!" : "FAILED";
 ```
 
 ---
 
-## 8. Dọn dẹp & reset
-
-### Reset DB hoàn toàn
+## 8. Xem Logs
 
 ```bash
-docker compose exec app php artisan migrate:fresh --seed
-```
+# Scraper chain
+docker compose logs worker-scraping --tail=30 -f
 
-### Xóa cache dedup (để scrape lại các MST đã xử lý)
+# Notifications (PDF + Telegram)
+docker compose logs worker-notifications --tail=20
 
-```bash
-docker compose exec app php artisan tinker
-```
+# Scheduler
+docker compose logs scheduler --tail=10
 
-```php
-// Xóa tất cả cache dedup
-Illuminate\Support\Facades\Cache::flush();
-echo "Cache cleared!\n";
-```
-
-### Tắt môi trường
-
-```bash
-docker compose down          # Tắt containers (giữ data)
-docker compose down -v       # Tắt + xóa volumes (reset DB)
+# Laravel log (errors)
+docker compose exec app tail -50 storage/logs/laravel.log
 ```
 
 ---
 
-## Tóm tắt logic lọc mới
+## 9. Reset / Dọn dẹp
 
-| Điều kiện | Ý nghĩa | Ví dụ |
-|-----------|---------|-------|
-| `registration_days_back = 3` | Chỉ lấy DN đăng ký từ ngày 27/06 đến 29/06 (nếu hôm nay là 29/06) | DN đăng ký 25/06 → bị loại |
-| `require_phone = true` | DN phải có số điện thoại | DN phone = null → bị loại |
-| Cả hai cùng bật | DN phải thỏa **cả hai** điều kiện + các filter khác (tỉnh, ngành) | Chỉ DN có SĐT + đăng ký 3 ngày gần nhất + đúng tỉnh + đúng ngành → mới gửi PDF |
+```bash
+# Reset DB (xóa toàn bộ data)
+docker compose exec app php artisan migrate:fresh
+
+# Xóa Redis dedup cache (để cào lại MST đã xử lý)
+docker compose exec app php artisan tinker --execute="Illuminate\Support\Facades\Cache::flush(); echo 'Cache cleared';"
+
+# Tắt hoàn toàn
+docker compose down
+
+# Tắt + xóa data (volumes)
+docker compose down -v
+```
 
 ---
 
-## Checklist test nhanh
+## 10. Checklist test nhanh
 
-- [ ] Docker compose up chạy không lỗi
-- [ ] API `http://localhost:8000/api/v1/companies/stats` trả về JSON
-- [ ] Frontend `http://localhost:3000` hiển thị Dashboard
-- [ ] Tạo được Telegram config + test kết nối thành công
-- [ ] Tạo được Filter với điều kiện ngày + SĐT
-- [ ] Fake data 3 DN (có SĐT/không SĐT/quá hạn ngày)
-- [ ] FilterService match đúng 1 DN (có SĐT + trong 3 ngày)
-- [ ] Dispatch job → nhận PDF trên Telegram
-- [ ] PDF hiển thị đầy đủ 2 phần thông tin
+- [ ] `docker compose up -d` chạy không lỗi (7 containers Up)
+- [ ] http://localhost:3000 hiển thị Dashboard
+- [ ] http://localhost:8000/api/v1/companies/stats trả về JSON
+- [ ] `php artisan scraper:run` dispatch chain OK
+- [ ] worker-scraping log: 3 jobs DONE (Rotate → Masothue → Tramasothue)
+- [ ] Tạo Telegram config + test kết nối thành công
+- [ ] Dispatch ProcessCompanyNotification → nhận PDF trên Telegram
+- [ ] PDF hiện đúng 2 section + dòng "Nguồn dữ liệu"
+- [ ] Test Google Sheet connection thành công
+- [ ] DN ghi vào Sheet có cột "Nguồn"
