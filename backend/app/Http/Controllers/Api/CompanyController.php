@@ -58,4 +58,59 @@ class CompanyController extends Controller
             ],
         ]);
     }
+
+    /**
+     * Store new company from Puppeteer extension.
+     */
+    public function store(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'mst' => 'required|string|max:20',
+            'name' => 'required|string',
+            'phone' => 'nullable|string',
+            'address' => 'nullable|string',
+            'representative' => 'nullable|string',
+            'operation_date' => 'nullable|string',
+            'industries' => 'nullable|array',
+            'province' => 'nullable|string',
+        ]);
+
+        $existing = Company::where('mst', $validated['mst'])->first();
+
+        if ($existing) {
+            $existing->mergeSource(Company::SOURCE_TRAMASOTHUE ?? 'tramasothue');
+
+            $fieldsToMerge = [];
+            foreach (['phone', 'address', 'representative', 'industries', 'province'] as $field) {
+                if (empty($existing->$field) && !empty($validated[$field])) {
+                    $fieldsToMerge[$field] = $validated[$field];
+                }
+            }
+
+            if (!empty($fieldsToMerge)) {
+                $existing->update($fieldsToMerge);
+            }
+
+            return response()->json([
+                'message' => 'Merged successfully',
+                'data' => $existing->fresh()
+            ]);
+        }
+
+        $company = Company::create(array_merge($validated, [
+            'source' => Company::SOURCE_TRAMASOTHUE ?? 'tramasothue',
+            'scraped_at' => now(),
+        ]));
+
+        app(\App\Services\GoogleSheetService::class)->appendCompany($company);
+
+        if (!empty($company->phone)) {
+            \App\Jobs\ProcessCompanyNotification::dispatch($company)->onQueue('notifications');
+        }
+
+        return response()->json([
+            'message' => 'Company saved successfully',
+            'data' => $company,
+        ]);
+    }
 }
