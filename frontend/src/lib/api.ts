@@ -26,6 +26,7 @@ async function request<T>(
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      'X-Extension-Secret': process.env.NEXT_PUBLIC_EXTENSION_SECRET || '',
       ...options.headers,
     },
     ...options,
