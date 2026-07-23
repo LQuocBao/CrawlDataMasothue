@@ -138,7 +138,7 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -155,7 +155,7 @@ services:
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -169,3 +169,14 @@ volumes:
 networks:
   mst-network:
     driver: bridge
+
+  # ─── Puppeteer Scraper ───────────────────────────────────────────────────
+  mst-puppeteer:
+    build:
+      context: ./puppeteer
+    container_name: mst-puppeteer
+    restart: unless-stopped
+    networks:
+      - mst-network
+    depends_on:
+      - mst-app

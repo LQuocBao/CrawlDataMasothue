@@ -1,0 +1,8 @@
+{
+    "name": "mst-puppeteer",
+    "version": "1.0.0",
+    "main": "run-scraper.js",
+    "dependencies": {
+        "puppeteer": "^22.0.0"
+    }
+}

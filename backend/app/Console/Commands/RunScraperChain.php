@@ -33,7 +33,7 @@ class RunScraperChain extends Command
         Bus::chain([
             new RotateProxyJob(),
             new ScrapeMasothueJob(),
-            new ScrapeTramasothueJob(),
+            // new ScrapeTramasothueJob(),
         ])
             ->onQueue('scraping')
             ->dispatch();
