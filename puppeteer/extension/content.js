@@ -1,5 +1,5 @@
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
+const API_BASE_URL = "http://mst-app:8000";
 async function extractAndSendData() {
     const nameEl = document.querySelector('h1 span[x-text="companyName"]');
     const mstEl = document.querySelector('div[x-data*="mst"] span');
