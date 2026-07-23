@@ -3,6 +3,12 @@
 .env.local
 .env.production
 
+# Log files - NEVER commit logs (may contain secrets/tokens)
+*.log
+/backend/storage/logs/
+/backend/storage/framework/cache/
+/backend/storage/framework/sessions/
+
 # IDE
 .idea/
 .vscode/
