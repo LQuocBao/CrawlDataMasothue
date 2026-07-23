@@ -1,6 +1,6 @@
 #!/bin/bash
 # Deploy script - Run this on the staging VPS (14.225.205.98)
-# Login: ssh root@14.225.205.98 (password: U8EW7nHyKZLltvbw5HCz)
+# Login: ssh root@14.225.205.98 
 
 set -e
 
