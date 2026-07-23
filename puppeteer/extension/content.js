@@ -29,7 +29,7 @@ async function extractAndSendData() {
     };
 
     try {
-        await fetch(`${API_BASE_URL}/api/companies`, {
+        await fetch(`${API_BASE_URL}/api/v1/companies`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",

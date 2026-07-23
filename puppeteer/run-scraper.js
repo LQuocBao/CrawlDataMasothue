@@ -48,7 +48,7 @@ async function startScraper() {
 
                     const postDataPromise = new Promise(resolve => {
                         detailPage.on('request', request => {
-                            if (request.url().includes('/api/companies') && request.method() === 'POST') {
+                            if (request.url().includes('/api/v1/companies') && request.method() === 'POST') {
                                 resolve();
                             }
                         });
