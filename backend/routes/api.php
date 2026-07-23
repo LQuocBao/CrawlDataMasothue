@@ -11,27 +11,46 @@ use Illuminate\Support\Facades\Route;
 |--------------------------------------------------------------------------
 |
 | REST API for the Next.js admin dashboard.
-| In production, protect these with Sanctum or similar auth.
+| Routes nhận dữ liệu từ Extension được bảo vệ bằng middleware extension.secret.
 |
 */
 
 Route::prefix('v1')->group(function () {
-    // Company data (read-only from dashboard)
+
+    // ---------------------------------------------------------------
+    // ROUTES DÀNH CHO DASHBOARD (đọc - không cần auth)
+    // ---------------------------------------------------------------
     Route::get('companies/stats', [CompanyController::class, 'stats']);
-    Route::apiResource('companies', CompanyController::class)->only(['index', 'show']);
+    Route::get('companies', [CompanyController::class, 'index']);
+    Route::get('companies/{company}', [CompanyController::class, 'show']);
 
-    // Filter management
-    Route::apiResource('filters', FilterController::class);
+    Route::get('filters', [FilterController::class, 'index']);
+    Route::get('telegram-configs', [TelegramConfigController::class, 'index']);
 
-    // Telegram configuration
-    Route::apiResource('telegram-configs', TelegramConfigController::class);
-    Route::post('telegram-configs/{telegramConfig}/test', [TelegramConfigController::class, 'test']);
-
-    // Google Sheets (danh sách theo ngày)
     Route::get('sheets', [\App\Http\Controllers\Api\GoogleSheetController::class, 'index']);
-
-    // System settings (Google Sheet URL, bật/tắt tính năng)
     Route::get('settings', [\App\Http\Controllers\Api\SettingsController::class, 'index']);
-    Route::put('settings', [\App\Http\Controllers\Api\SettingsController::class, 'update']);
-    Route::post('settings/test-sheet', [\App\Http\Controllers\Api\SettingsController::class, 'testSheet']);
+
+    // ---------------------------------------------------------------
+    // ROUTES NHẬN DỮ LIỆU TỪ EXTENSION (ghi - bắt buộc có secret)
+    // ---------------------------------------------------------------
+    Route::middleware('extension.secret')->group(function () {
+        Route::post('companies', [CompanyController::class, 'store']);
+    });
+
+    // ---------------------------------------------------------------
+    // ROUTES QUẢN TRỊ HỆ THỐNG (ghi - bắt buộc có secret)
+    // ---------------------------------------------------------------
+    Route::middleware('extension.secret')->group(function () {
+        Route::post('filters', [FilterController::class, 'store']);
+        Route::put('filters/{filter}', [FilterController::class, 'update']);
+        Route::delete('filters/{filter}', [FilterController::class, 'destroy']);
+
+        Route::post('telegram-configs', [TelegramConfigController::class, 'store']);
+        Route::put('telegram-configs/{telegramConfig}', [TelegramConfigController::class, 'update']);
+        Route::delete('telegram-configs/{telegramConfig}', [TelegramConfigController::class, 'destroy']);
+        Route::post('telegram-configs/{telegramConfig}/test', [TelegramConfigController::class, 'test']);
+
+        Route::put('settings', [\App\Http\Controllers\Api\SettingsController::class, 'update']);
+        Route::post('settings/test-sheet', [\App\Http\Controllers\Api\SettingsController::class, 'testSheet']);
+    });
 });

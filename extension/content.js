@@ -29,9 +29,12 @@ async function extractAndSendData() {
     };
 
     try {
-        await fetch("http://localhost:8000/api/companies", {
+        await fetch(`${API_BASE_URL}/api/companies`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                "X-Extension-Secret": EXTENSION_SECRET
+            },
             body: JSON.stringify(data)
         });
     } catch (error) {

@@ -11,6 +11,7 @@ return [
     'faker_locale' => 'vi_VN',
     'cipher' => 'AES-256-CBC',
     'key' => env('APP_KEY'),
+    'extension_secret' => env('EXTENSION_SECRET', ''),
     'maintenance' => [
         'driver' => 'file',
     ],
