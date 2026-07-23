@@ -1,0 +1,49 @@
+{
+    "manifest_version": 3,
+    "name": "Auto Tramasothue",
+    "version": "1.0",
+    "permissions": [
+        "storage",
+        "scripting"
+    ],
+    "host_permissions": [
+        "https://tramasothue.com.vn/*",
+        "https://www.google.com/recaptcha/*",
+        "https://api.groq.com/*"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://tramasothue.com.vn/*"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "run_at": "document_idle",
+            "all_frames": false
+        },
+        {
+            "matches": [
+                "https://www.google.com/recaptcha/api2/anchor*"
+            ],
+            "js": [
+                "recaptcha_clicker.js"
+            ],
+            "run_at": "document_idle",
+            "all_frames": true
+        },
+        {
+            "matches": [
+                "https://www.google.com/recaptcha/api2/bframe*"
+            ],
+            "js": [
+                "recaptcha_audio_solver.js"
+            ],
+            "run_at": "document_idle",
+            "all_frames": true
+        }
+    ]
+}
