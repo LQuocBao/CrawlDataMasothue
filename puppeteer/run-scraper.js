@@ -12,7 +12,9 @@ async function startScraper() {
             `--load-extension=${extensionPath}`,
             '--no-sandbox',
             '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage' // Chống sập trang khi chạy lâu
+            '--disable-dev-shm-usage', // Chống sập trang khi chạy lâu
+            '--disable-web-security', // Tắt CORS
+            '--allow-running-insecure-content' // Cho phép gửi request HTTP (mst-app) từ trang HTTPS (tramasothue)
         ]
     });
 
