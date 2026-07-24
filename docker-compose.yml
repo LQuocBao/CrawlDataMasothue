@@ -117,6 +117,7 @@ services:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://14.225.205.98:8000
+      - NEXT_PUBLIC_EXTENSION_SECRET=fR3ahTiZb6L2jeIrnocyQ7EDklpwM8YVKFNA4uW0UJqt9OzH
     depends_on:
       - app
     networks:
