@@ -162,14 +162,6 @@ services:
     networks:
       - mst-network
 
-volumes:
-  mysql-data:
-  redis-data:
-
-networks:
-  mst-network:
-    driver: bridge
-
   # ─── Puppeteer Scraper ───────────────────────────────────────────────────
   mst-puppeteer:
     build:
@@ -179,4 +171,12 @@ networks:
     networks:
       - mst-network
     depends_on:
-      - mst-app
+      - app
+
+volumes:
+  mysql-data:
+  redis-data:
+
+networks:
+  mst-network:
+    driver: bridge
