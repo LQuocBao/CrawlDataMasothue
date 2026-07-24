@@ -134,8 +134,6 @@ services:
       MYSQL_DATABASE: masothue_scraper
       MYSQL_USER: scraper
       MYSQL_PASSWORD: scraper_pass
-    ports:
-      - "3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:
@@ -151,8 +149,6 @@ services:
     image: redis:7-alpine
     container_name: mst-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
