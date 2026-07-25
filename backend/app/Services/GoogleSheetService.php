@@ -17,7 +17,7 @@ class GoogleSheetService
     /**
      * Fallback URL nếu chưa cấu hình trong DB.
      */
-    private const FALLBACK_URL = 'https://script.google.com/macros/s/AKfycbyIH3Ad1O6NbItD7C_hav21vNkc9dhl63j8AHTVFTqzBAoExtpwaYxzFh1cvl2ypop0/exec';
+    private const FALLBACK_URL = 'https://script.google.com/macros/s/AKfycbz9ZoJxt6JXgZkRcGgMAkuNFJ_0nA38bCE5W2BHMvCv3yq0Zz9UR5So3zJdNnKkbu33/exec';
 
     /**
      * Ghi 1 DN vào Google Sheet.

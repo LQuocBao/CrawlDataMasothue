@@ -3,10 +3,11 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, Filter, Send, Database, FileSpreadsheet, Settings } from 'lucide-react';
+import { LayoutDashboard, Filter, Send, Building2, FileSpreadsheet, Settings } from 'lucide-react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/companies', label: 'Doanh nghiệp', icon: Building2 },
   { href: '/filters', label: 'Bộ lọc', icon: Filter },
   { href: '/telegram', label: 'Telegram', icon: Send },
   { href: '/sheets', label: 'Google Sheets', icon: FileSpreadsheet },

@@ -17,6 +17,7 @@ export interface Company {
   registration_date: string | null;
   operation_date: string | null;
   status: string;
+  source: string | null;
   industries: Industry[];
   managing_tax_authority: string | null;
   notification_sent: boolean;
@@ -79,8 +80,12 @@ export interface TelegramConfigFormData {
 export interface DashboardStats {
   total_companies: number;
   with_phone: number;
+  scraped_today: number;
   sent_today: number;
   notifications_sent: number;
+  source_masothue: number;
+  source_tramasothue: number;
+  source_both: number;
   provinces: string[];
 }
 
