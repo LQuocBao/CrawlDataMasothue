@@ -55,6 +55,7 @@ export function DashboardContent() {
   const totalCompanies = stats?.total_companies ?? 0;
   const withPhone = stats?.with_phone ?? 0;
   const sentToday = stats?.sent_today ?? 0;
+  const scrapedToday = stats?.scraped_today ?? 0;
   const skipped = totalCompanies - withPhone;
 
   const statCards = [
@@ -67,12 +68,20 @@ export function DashboardContent() {
       desc: 'Tất cả DN đã thu thập',
     },
     {
+      label: 'DN cào hôm nay',
+      value: scrapedToday,
+      icon: TrendingUp,
+      color: 'text-indigo-600',
+      bg: 'bg-indigo-50',
+      desc: 'DN mới trong ngày',
+    },
+    {
       label: 'DN có SĐT',
       value: withPhone,
       icon: Phone,
       color: 'text-green-600',
       bg: 'bg-green-50',
-      desc: 'DN đủ điều kiện gửi',
+      desc: 'Đủ điều kiện gửi',
     },
     {
       label: 'Đã gửi hôm nay',
@@ -81,14 +90,6 @@ export function DashboardContent() {
       color: 'text-purple-600',
       bg: 'bg-purple-50',
       desc: 'Thông báo Telegram',
-    },
-    {
-      label: 'DN bị loại',
-      value: skipped,
-      icon: TrendingUp,
-      color: 'text-red-500',
-      bg: 'bg-red-50',
-      desc: 'Không có SĐT',
     },
   ];
 
@@ -124,28 +125,59 @@ export function DashboardContent() {
         })}
       </div>
 
-      {/* Recent Activity */}
-      <div className="card">
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">Trạng thái hệ thống</h3>
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-            </span>
-            <span className="text-sm text-gray-700">Scraper đang hoạt động (quét mỗi 30 giây)</span>
+      {/* Recent Activity & Sources */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Trạng thái hệ thống</h3>
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+              </span>
+              <span className="text-sm text-gray-700">Scraper đang hoạt động (quét mỗi 30 giây)</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-3 w-3">
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+              </span>
+              <span className="text-sm text-gray-700">Telegram Bot kết nối</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-3 w-3">
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+              </span>
+              <span className="text-sm text-gray-700">Proxy TMProxy active</span>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="relative flex h-3 w-3">
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-            </span>
-            <span className="text-sm text-gray-700">Telegram Bot kết nối</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="relative flex h-3 w-3">
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-            </span>
-            <span className="text-sm text-gray-700">Proxy TMProxy active</span>
+        </div>
+
+        <div className="card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Nguồn dữ liệu (Tỉ lệ trùng)</h3>
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-600">Trang masothue</span>
+              <span className="font-semibold text-gray-900">{stats?.source_masothue ?? 0} DN</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${Math.min(100, ((stats?.source_masothue ?? 0) / (totalCompanies || 1)) * 100)}%` }}></div>
+            </div>
+
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-600">Trang tramasothue</span>
+              <span className="font-semibold text-gray-900">{stats?.source_tramasothue ?? 0} DN</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="bg-purple-600 h-2 rounded-full" style={{ width: `${Math.min(100, ((stats?.source_tramasothue ?? 0) / (totalCompanies || 1)) * 100)}%` }}></div>
+            </div>
+
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-600">Trùng lặp (Cả 2 nguồn)</span>
+              <span className="font-semibold text-gray-900">{stats?.source_both ?? 0} DN</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="bg-green-600 h-2 rounded-full" style={{ width: `${Math.min(100, ((stats?.source_both ?? 0) / (totalCompanies || 1)) * 100)}%` }}></div>
+            </div>
           </div>
         </div>
       </div>

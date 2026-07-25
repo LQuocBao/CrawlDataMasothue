@@ -50,10 +50,14 @@ class CompanyController extends Controller
             'data' => [
                 'total_companies' => Company::count(),
                 'with_phone' => Company::whereNotNull('phone')->where('phone', '!=', '')->count(),
+                'scraped_today' => Company::whereDate('scraped_at', today())->count(),
                 'sent_today' => Company::where('notification_sent', true)
                     ->whereDate('updated_at', today())
                     ->count(),
                 'notifications_sent' => Company::where('notification_sent', true)->count(),
+                'source_masothue' => Company::where('source', 'masothue')->count(),
+                'source_tramasothue' => Company::where('source', 'tramasothue')->count(),
+                'source_both' => Company::where('source', 'both')->count(),
                 'provinces' => Company::distinct('province')->pluck('province')->filter()->values(),
             ],
         ]);
@@ -90,6 +94,14 @@ class CompanyController extends Controller
             if (!empty($fieldsToMerge)) {
                 $existing->update($fieldsToMerge);
             }
+
+            // Gửi thông báo nếu có số ĐT và chưa từng gửi
+            if (!empty($existing->phone) && !$existing->notification_sent) {
+                \App\Jobs\ProcessCompanyNotification::dispatch($existing)->onQueue('notifications');
+            }
+
+            // Cập nhật Google Sheet
+            app(\App\Services\GoogleSheetService::class)->appendCompany($existing);
 
             return response()->json([
                 'message' => 'Merged successfully',

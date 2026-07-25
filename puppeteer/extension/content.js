@@ -1,10 +1,31 @@
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const API_BASE_URL = "http://mst-app:8000";
 async function extractAndSendData() {
-    const nameEl = document.querySelector('h1 span[x-text="companyName"]');
-    const mstEl = document.querySelector('div[x-data*="mst"] span');
-    const phoneEl = document.querySelector('p[x-data*="phone"]');
-    const addressEl = document.querySelector('span[x-data*="taxAddress"]');
+    const html = document.documentElement.outerHTML;
+
+    function extractXData(key) {
+        let pattern1 = new RegExp(`x-data="\\{\\s*${key}:\\s*'([^']+)'`);
+        let m1 = html.match(pattern1);
+        if (m1) return m1[1].trim();
+
+        let pattern2 = new RegExp(`x-data='\\{\\s*${key}:\\s*"([^"]+)"`);
+        let m2 = html.match(pattern2);
+        if (m2) return m2[1].trim();
+
+        let pattern3 = new RegExp(`x-data="\\{\\s*${key}:\\s*\`([^\`]+)\``);
+        let m3 = html.match(pattern3);
+        if (m3) return m3[1].trim();
+        return "";
+    }
+
+    const mst = extractXData('mst') || (document.querySelector('div[x-data*="mst"] span') ? document.querySelector('div[x-data*="mst"] span').innerText.trim() : "");
+    let name = extractXData('companyName');
+    if (!name) {
+        const h1 = document.querySelector('h1');
+        if (h1) name = h1.innerText.trim();
+    }
+    const phone = extractXData('phone') || (document.querySelector('p[x-data*="phone"]') ? document.querySelector('p[x-data*="phone"]').innerText.trim() : "");
+    let address = extractXData('taxAddress') || extractXData('address') || (document.querySelector('span[x-data*="taxAddress"]') ? document.querySelector('span[x-data*="taxAddress"]').innerText.trim() : "");
 
     const industries = [];
     const industryEls = document.querySelectorAll('ul.space-y-3 > li');
@@ -21,10 +42,10 @@ async function extractAndSendData() {
     }
 
     const data = {
-        name: nameEl ? nameEl.innerText.trim() : "",
-        mst: mstEl ? mstEl.innerText.trim() : "",
-        phone: phoneEl ? phoneEl.innerText.trim() : "",
-        address: addressEl ? addressEl.innerText.trim() : "",
+        name: name,
+        mst: mst,
+        phone: phone,
+        address: address,
         industries: industries
     };
 
