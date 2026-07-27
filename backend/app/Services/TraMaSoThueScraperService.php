@@ -17,7 +17,7 @@ use Symfony\Component\DomCrawler\Crawler;
 class TraMaSoThueScraperService
 {
     private const BASE_URL = 'https://tramasothue.com.vn';
-    private const LISTING_PATH = '/doanh-nghiep-moi-dang-ky';
+    private const LISTING_PATH = '/'; // Danh sách DN mới nằm ở trang chủ
 
     /**
      * Fetch listing page, parse ra danh sách URL DN "Mới đăng ký".
@@ -53,32 +53,40 @@ class TraMaSoThueScraperService
         try {
             $crawler = new Crawler($html);
 
-            // Tìm các block chứa "Mới đăng ký"
-            $crawler->filter('div.bg-white.rounded-xl')->each(function (Crawler $node) use (&$urls) {
-                // Kiểm tra có badge "Mới đăng ký"
-                $badge = $node->filter('span');
+            // Trang chủ tramasothue.com.vn:
+            // Mỗi DN trong section "Doanh nghiệp mới thành lập" có cấu trúc:
+            // div.bg-white.p-5.rounded-xl > div > div.flex-1 > h3 > a[href]
+            // Badge "Mới đăng ký" nằm trong span.bg-green-50
+            $crawler->filter('div.bg-white.p-5.rounded-xl')->each(function (Crawler $node) use (&$urls) {
+                // Kiểm tra badge "Mới đăng ký" trong span
                 $hasBadge = false;
-
-                $badge->each(function (Crawler $span) use (&$hasBadge) {
-                    if (str_contains($span->text(''), 'Mới đăng ký')) {
-                        $hasBadge = true;
-                    }
-                });
+                try {
+                    $node->filter('span')->each(function (Crawler $span) use (&$hasBadge) {
+                        if (str_contains(trim($span->text('')), 'Mới đăng ký')) {
+                            $hasBadge = true;
+                        }
+                    });
+                } catch (\Throwable $e) {}
 
                 if (!$hasBadge) {
                     return;
                 }
 
-                // Lấy href từ thẻ <a>
-                $link = $node->filter('a[href]');
-                if ($link->count() > 0) {
-                    $href = $link->first()->attr('href');
-                    if ($href && str_starts_with($href, 'http')) {
-                        $urls[] = $href;
-                    } elseif ($href) {
-                        $urls[] = self::BASE_URL . '/' . ltrim($href, '/');
+                // Lấy href từ thẻ <a> đầu tiên trong h3 hoặc toàn block
+                try {
+                    $link = $node->filter('h3 a[href]');
+                    if ($link->count() === 0) {
+                        $link = $node->filter('a[href]');
                     }
-                }
+                    if ($link->count() > 0) {
+                        $href = $link->first()->attr('href');
+                        if ($href && str_starts_with($href, 'http')) {
+                            $urls[] = $href;
+                        } elseif ($href) {
+                            $urls[] = self::BASE_URL . '/' . ltrim($href, '/');
+                        }
+                    }
+                } catch (\Throwable $e) {}
             });
         } catch (\Throwable $e) {
             Log::error('TraMaSoThueScraperService: Parse listing failed', [
