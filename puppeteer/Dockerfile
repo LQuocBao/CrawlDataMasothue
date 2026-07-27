@@ -19,5 +19,8 @@ RUN npm install
 # Copy source code và extension
 COPY . .
 
-# Khởi chạy script
-CMD ["node", "run-scraper.js"]
+# Đảm bảo script inject config có quyền chạy
+RUN chmod +x /app/inject-config.sh
+
+# Khởi chạy qua inject-config.sh (inject env vars → start scraper)
+CMD ["/bin/sh", "/app/inject-config.sh"]
