@@ -23,6 +23,7 @@ services:
       - REDIS_HOST=redis
       - QUEUE_CONNECTION=redis
       - CACHE_DRIVER=redis
+      - EXTENSION_SECRET=${EXTENSION_SECRET:-fR3ahTiZb6L2jeIrnocyQ7EDklpwM8YVKFNA4uW0UJqt9OzH}
     depends_on:
       mysql:
         condition: service_healthy
