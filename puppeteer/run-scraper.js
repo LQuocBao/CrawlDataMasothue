@@ -21,6 +21,7 @@ function postCompanyToAPI(data) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Accept': 'application/json',
                 'X-Extension-Secret': EXTENSION_SECRET,
                 'Content-Length': Buffer.byteLength(postData),
             },
@@ -52,14 +53,24 @@ function postCompanyToAPI(data) {
 // ─── Helper: Extract data từ trang chi tiết bằng page.evaluate() ─────────────
 async function extractCompanyData(page) {
     return await page.evaluate(() => {
-        const html = document.documentElement.outerHTML;
+        // Lấy tất cả thuộc tính x-data và gom thành 1 object duy nhất
+        const dataObj = {};
+        document.querySelectorAll('[x-data]').forEach(el => {
+            const attr = el.getAttribute('x-data');
+            if (!attr) return;
+            try {
+                // Alpine x-data là JS object literal, parse nó bằng Function
+                const obj = new Function('return ' + attr)();
+                if (typeof obj === 'object' && obj !== null) {
+                    Object.assign(dataObj, obj);
+                }
+            } catch (e) {
+                // Bỏ qua nếu không parse được
+            }
+        });
 
-        function extractXData(key) {
-            let m = html.match(new RegExp(`x-data="\\{\\s*${key}:\\s*'([^']+)'`));
-            if (m) return m[1].trim();
-            m = html.match(new RegExp(`x-data='\\{\\s*${key}:\\s*"([^"]+)"`));
-            if (m) return m[1].trim();
-            return "";
+        function getVal(key) {
+            return dataObj[key] ? String(dataObj[key]).trim() : "";
         }
 
         function queryText(sel) {
@@ -67,16 +78,25 @@ async function extractCompanyData(page) {
             return el ? el.innerText.trim() : "";
         }
 
-        const mst = extractXData('mst') || queryText('div[x-data*="mst"] span');
-        let name = extractXData('companyName');
+        let mst = getVal('mst');
+        if (!mst) {
+            // Fallback: Tìm MST trong text
+            const mstEl = Array.from(document.querySelectorAll('span, div')).find(el => el.textContent.includes('MST:'));
+            if (mstEl) {
+                const match = mstEl.textContent.match(/MST:\s*(\d+)/);
+                if (match) mst = match[1];
+            }
+        }
+
+        let name = getVal('companyName');
         if (!name) {
             const h1 = document.querySelector('h1');
             if (h1) name = h1.innerText.trim();
         }
 
-        const phone = extractXData('phone') || queryText('[x-data*="phone"]');
-        const address = extractXData('taxAddress') || extractXData('address') || queryText('[x-data*="taxAddress"]');
-        const representative = extractXData('representative') || extractXData('owner') || "";
+        const phone = getVal('phone');
+        const address = getVal('taxAddress') || getVal('address');
+        const representative = getVal('representative') || getVal('owner');
 
         // Ngành nghề
         const industries = [];
