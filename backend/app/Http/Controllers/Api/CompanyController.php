@@ -49,7 +49,10 @@ class CompanyController extends Controller
         return response()->json([
             'data' => [
                 'total_companies' => Company::count(),
-                'with_phone' => Company::whereNotNull('phone')->where('phone', '!=', '')->count(),
+                'with_phone' => Company::whereNotNull('phone')
+                    ->where('phone', '!=', '')
+                    ->whereDate('scraped_at', today())
+                    ->count(),
                 'scraped_today' => Company::whereDate('scraped_at', today())->count(),
                 'sent_today' => Company::where('notification_sent', true)
                     ->whereDate('updated_at', today())
